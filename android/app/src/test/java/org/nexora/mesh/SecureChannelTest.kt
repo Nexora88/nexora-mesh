@@ -7,6 +7,21 @@ import javax.crypto.AEADBadTagException
 
 class SecureChannelTest {
     @Test
+    fun sharedV1KdfVectorMatchesSwiftContract() {
+        val secret = ByteArray(32) { it.toByte() }
+        val expected = "f686564b5419341dd9eaa8bcfa472c607e046069d08e66243c97a0fa180d0162"
+        val actual = SecureChannel.deriveKeyFromSharedSecret(secret)
+            .joinToString("") { "%02x".format(it) }
+        org.junit.Assert.assertEquals(expected, actual)
+    }
+
+    @Test
+    fun fingerprintVectorMatchesSwiftContract() {
+        val expected = "E4:F6:0D:0A:A6:D7:F3:D3:B6:A6:49:4B:1C:86:1B:99:F6:49:C6:F9"
+        org.junit.Assert.assertEquals(expected, SecureChannel.fingerprint(byteArrayOf(0x30, 0x00)))
+    }
+
+    @Test
     fun bothPeersDeriveSameKeyAndDecryptAuthenticatedPayload() {
         val alice = SecureChannel.newIdentityKeyPair()
         val bob = SecureChannel.newIdentityKeyPair()
