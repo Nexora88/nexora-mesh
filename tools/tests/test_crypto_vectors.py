@@ -19,10 +19,9 @@ class SessionKeyVectors(unittest.TestCase):
 
     def test_fingerprint_vector(self):
         public_key_der = bytes.fromhex("3000")
-        expected = hashlib.sha256(public_key_der).digest()[:20]
-        rendered = ":".join(f"{byte:02X}" for byte in expected)
-        self.assertEqual(20, len(rendered.split(":")))
-        self.assertEqual(hashlib.sha256(public_key_der).digest()[:20], bytes.fromhex(rendered.replace(":", "")))
+        expected = "E4:F6:0D:0A:A6:D7:F3:D3:B6:A6:49:4B:1C:86:1B:99:F6:49:C6:F9"
+        rendered = ":".join(f"{byte:02X}" for byte in hashlib.sha256(public_key_der).digest()[:20])
+        self.assertEqual(expected, rendered)
 
 
 if __name__ == "__main__":
