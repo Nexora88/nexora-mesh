@@ -35,7 +35,7 @@ private enum MeshTab: String, CaseIterable {
 }
 
 private struct ChatItem: Identifiable {
-    let id = UUID()
+    let id: String
     let title: String
     let detail: String
     let initials: String
@@ -50,10 +50,6 @@ struct MeshRootView: View {
     @State private var qrTrustStatus = ""
     @State private var showQRScanner = false
 
-    private let chats = [
-        ChatItem(title: "Yerel notlar", detail: "Nexora Mesh'e hoş geldin", initials: "NM"),
-        ChatItem(title: "Güvenilir cihazlar", detail: "Eşleştirilmiş cihazların burada görünür", initials: "GC")
-    ]
 
     var body: some View {
         ZStack {
@@ -131,33 +127,49 @@ struct MeshRootView: View {
 
     private var chatsView: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Text("Sohbetler")
-                .font(.largeTitle.bold())
-                .foregroundStyle(.white)
-            Text("Buradaki örnek sohbetler henüz başka cihaza mesaj göndermez.")
-                .font(.subheadline)
-                .foregroundStyle(MeshPalette.muted)
-            ForEach(chats) { chat in
-                Button { selectedChat = chat } label: {
-                    HStack(spacing: 12) {
-                        Text(chat.initials)
-                            .font(.headline.bold())
-                            .foregroundStyle(MeshPalette.green)
-                            .frame(width: 48, height: 48)
-                            .background(Color(red: 28 / 255, green: 69 / 255, blue: 53 / 255), in: Circle())
-                        VStack(alignment: .leading, spacing: 5) {
-                            Text(chat.title).font(.headline).foregroundStyle(.white)
-                            Text(chat.detail).font(.caption).foregroundStyle(MeshPalette.muted)
-                        }
-                        Spacer()
-                        Image(systemName: "chevron.right").foregroundStyle(MeshPalette.muted)
-                    }
-                    .padding(14)
-                    .background(MeshPalette.surface, in: RoundedRectangle(cornerRadius: 18))
-                }
-                .buttonStyle(.plain)
+            HStack(alignment: .firstTextBaseline) {
+                Text("Sohbetler").font(.largeTitle.bold()).foregroundStyle(.white)
+                Spacer()
+                Text("\(secureChat.trustedContacts.count) güvenilir kişi")
+                    .font(.caption).foregroundStyle(MeshPalette.muted)
             }
-            Spacer()
+            if secureChat.trustedContacts.isEmpty {
+                infoCard("Önce bir cihazı tanı", "Profil sekmesinden QR kodunu kamerayla tara. Parmak izi doğrulandıktan sonra gerçek sohbet burada açılabilir.", symbol: "qrcode.viewfinder")
+                Spacer()
+            } else {
+                Text("Mesajlar yalnızca seçtiğin QR doğrulamalı kişiyle güvenli oturum kurulduğunda gönderilir.")
+                    .font(.subheadline).foregroundStyle(MeshPalette.muted)
+                ForEach(secureChat.trustedContacts, id: \.fingerprint) { contact in
+                    let chat = ChatItem(
+                        id: contact.fingerprint,
+                        title: contact.label,
+                        detail: "QR doğrulandı · \(String(contact.fingerprint.prefix(14)))…",
+                        initials: String(contact.label.prefix(2)).uppercased()
+                    )
+                    Button {
+                        secureChat.selectRecipient(contact.fingerprint)
+                        selectedChat = chat
+                    } label: {
+                        HStack(spacing: 12) {
+                            ZStack {
+                                Circle().fill(Color(red: 28 / 255, green: 69 / 255, blue: 53 / 255))
+                                Text(chat.initials).font(.headline.bold()).foregroundStyle(MeshPalette.green)
+                            }
+                            .frame(width: 48, height: 48)
+                            VStack(alignment: .leading, spacing: 5) {
+                                Text(contact.label).font(.headline).foregroundStyle(.white)
+                                Text(chat.detail).font(.caption2.monospaced()).foregroundStyle(MeshPalette.muted)
+                            }
+                            Spacer()
+                            Image(systemName: "lock.shield").foregroundStyle(MeshPalette.green)
+                        }
+                        .padding(14)
+                        .background(MeshPalette.surface, in: RoundedRectangle(cornerRadius: 18))
+                    }
+                    .buttonStyle(.plain)
+                }
+                Spacer()
+            }
         }
         .padding(.horizontal, 18)
         .padding(.top, 8)
