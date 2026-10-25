@@ -58,6 +58,25 @@ class PendingDeliveryQueueTest {
         assertEquals("encrypted-frame", restarted.get("id-1"))
     }
 
+    @Test fun lostAckAndConnectionRestartKeepFrameForRetry() {
+        val durable = linkedMapOf<String, String>()
+        val firstConnection = PendingDeliveryQueue(persist = { snapshot ->
+            durable.clear()
+            durable.putAll(snapshot)
+            true
+        })
+        assertTrue(firstConnection.enqueue("msg-ack-lost", "encrypted-frame"))
+        // Simulate disconnect/process death before the delivery ACK arrives.
+        val afterReconnect = PendingDeliveryQueue(initial = durable, persist = { snapshot ->
+            durable.clear()
+            durable.putAll(snapshot)
+            true
+        })
+        assertEquals("encrypted-frame", afterReconnect.get("msg-ack-lost"))
+        assertTrue(afterReconnect.acknowledge("msg-ack-lost"))
+        assertFalse(durable.containsKey("msg-ack-lost"))
+    }
+
     @Test fun duplicateAckCannotRemoveAnyOtherPendingFrame() {
         val queue = PendingDeliveryQueue(persist = { true })
         assertTrue(queue.enqueue("id-1", "frame-1"))
