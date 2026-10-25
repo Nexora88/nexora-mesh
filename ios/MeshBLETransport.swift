@@ -32,6 +32,7 @@ final class MeshBLETransport: NSObject, ObservableObject {
         let count: Int
         var chunks: [Int: Data] = [:]
         var receivedBytes = 0
+        let createdAt = Date()
     }
 
     override init() {
@@ -124,6 +125,8 @@ final class MeshBLETransport: NSObject, ObservableObject {
     }
 
     private func acceptFragment(_ data: Data) {
+        let now = Date()
+        assemblies = assemblies.filter { now.timeIntervalSince($0.value.createdAt) <= 30 }
         guard data.count >= Self.headerBytes else { status = "Kısa BLE parçası reddedildi."; return }
         let id = data.prefix(16).map { String(format: "%02x", $0) }.joined()
         guard let index = data.uint16(at: 16), let count = data.uint16(at: 18),
