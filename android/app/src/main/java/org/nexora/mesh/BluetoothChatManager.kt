@@ -446,6 +446,10 @@ class BluetoothChatManager(context: Context) {
         val size = payload.getInt("size")
         val digest = Base64.decode(payload.getString("sha"), Base64.DEFAULT)
         val bytes = Base64.decode(payload.getString("data"), Base64.DEFAULT)
+        // Bound memory use: only one incomplete transfer is accepted per connection.
+        require(mediaReassemblers.containsKey(id) || mediaReassemblers.isEmpty()) {
+            "Another media transfer is already in progress"
+        }
         val reassembler = mediaReassemblers.computeIfAbsent(id) {
             mediaNames[id] = name
             MediaTransferProtocol.Reassembler(id, total, size, digest)
