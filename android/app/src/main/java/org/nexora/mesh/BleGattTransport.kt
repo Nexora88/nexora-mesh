@@ -201,6 +201,9 @@ class BleGattTransport(context: Context) {
             else status("BLE GATT servisi eklenemedi: $statusCode")
         }
         override fun onConnectionStateChange(device: BluetoothDevice, statusCode: Int, newState: Int) {
+        override fun onMtuChanged(device: BluetoothDevice, mtuSize: Int) {
+            if (mtuSize >= 23) mtu = mtuSize
+        }
             if (newState == BluetoothProfile.STATE_CONNECTED) {
                 serverPeer = device
                 serverPeerReady = false
