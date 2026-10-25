@@ -60,8 +60,10 @@ pub fn decode_envelope(bytes: &[u8]) -> Result<Envelope, WireError> {
     if hops_remaining == 0 || hops_remaining > MAX_HOPS {
         return Err(WireError::InvalidHopBudget);
     }
-    let expires_at_unix = u64::from_be_bytes(bytes[36..44].try_into().expect("fixed header checked"));
-    let ciphertext_len = u32::from_be_bytes(bytes[44..48].try_into().expect("fixed header checked")) as usize;
+    let expires_at_unix =
+        u64::from_be_bytes(bytes[36..44].try_into().expect("fixed header checked"));
+    let ciphertext_len =
+        u32::from_be_bytes(bytes[44..48].try_into().expect("fixed header checked")) as usize;
     if ciphertext_len == 0 {
         return Err(WireError::EmptyCiphertext);
     }
@@ -129,7 +131,10 @@ mod tests {
     #[test]
     fn rejects_truncated_and_trailing_bytes() {
         let bytes = encode_envelope(&sample()).unwrap();
-        assert_eq!(decode_envelope(&bytes[..bytes.len() - 1]), Err(WireError::TruncatedCiphertext));
+        assert_eq!(
+            decode_envelope(&bytes[..bytes.len() - 1]),
+            Err(WireError::TruncatedCiphertext)
+        );
         let mut trailing = bytes;
         trailing.push(0);
         assert_eq!(decode_envelope(&trailing), Err(WireError::TrailingBytes));
@@ -139,6 +144,9 @@ mod tests {
     fn rejects_empty_ciphertext() {
         let mut bytes = encode_envelope(&sample()).unwrap();
         bytes[44..48].copy_from_slice(&0u32.to_be_bytes());
-        assert_eq!(decode_envelope(&bytes[..HEADER_LEN]), Err(WireError::EmptyCiphertext));
+        assert_eq!(
+            decode_envelope(&bytes[..HEADER_LEN]),
+            Err(WireError::EmptyCiphertext)
+        );
     }
 }
