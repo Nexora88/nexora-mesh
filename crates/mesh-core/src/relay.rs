@@ -189,6 +189,18 @@ impl RelayQueue {
         RelayDecision::Forward
     }
 
+    /// Export replay IDs for durable app-layer storage.
+    pub fn seen_snapshot(&self) -> Vec<[u8; 16]> {
+        self.seen_order.iter().copied().collect()
+    }
+
+    /// Restore replay IDs before accepting radio traffic after process restart.
+    pub fn restore_seen(&mut self, ids: &[[u8; 16]]) {
+        for id in ids.iter().rev().take(self.seen_capacity) {
+            self.remember(*id);
+        }
+    }
+
     /// Return a bounded snapshot suitable for durable app-layer storage.
     /// The snapshot contains opaque ciphertext envelopes only; it does not include keys.
     pub fn persisted_snapshot(&self) -> Result<Vec<Vec<u8>>, crate::wire::WireError> {
@@ -344,6 +356,22 @@ mod tests {
         assert!(!policy.may_relay(low, true));
         assert_eq!(policy.recommended_scan_interval_seconds(low), 300);
         assert!(!policy.may_relay(RelayPowerState { app_foreground: true, ..low }, false));
+    }
+
+    #[test]
+    fn replay_ids_can_be_persisted_across_restart() {
+        let mut source = RelayQueue::new(4, 8);
+        source.set_relay_enabled(true);
+        source.enqueue(envelope(3, 3, 100), 1);
+        let seen = source.seen_snapshot();
+
+        let mut restored = RelayQueue::new(4, 8);
+        restored.set_relay_enabled(true);
+        restored.restore_seen(&seen);
+        assert_eq!(
+            restored.enqueue(envelope(3, 3, 100), 2),
+            RelayDecision::DropDuplicate
+        );
     }
 
     #[test]
