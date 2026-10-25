@@ -294,10 +294,27 @@ private struct ChatPrototypeView: View {
             }
             .padding()
             .background(MeshPalette.surface)
-            Text(secureChat.status)
-                .font(.caption).foregroundStyle(MeshPalette.muted)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal).padding(.top, 8)
+            VStack(alignment: .leading, spacing: 6) {
+                Text(secureChat.status)
+                    .font(.caption).foregroundStyle(MeshPalette.muted)
+                Picker("Güvenilir alıcı", selection: Binding(
+                    get: { secureChat.selectedRecipientFingerprint ?? "" },
+                    set: { fingerprint in
+                        secureChat.selectRecipient(fingerprint.isEmpty ? nil : fingerprint)
+                        draft = secureChat.loadDraft(for: fingerprint.isEmpty ? nil : fingerprint)
+                    }
+                )) {
+                    Text("Alıcı seç").tag("")
+                    ForEach(secureChat.trustedContacts, id: \.fingerprint) { contact in
+                        Text("\(contact.label) · \(String(contact.fingerprint.prefix(8)))").tag(contact.fingerprint)
+                    }
+                }
+                .pickerStyle(.menu)
+                Text(secureChat.draftStatus)
+                    .font(.caption2).foregroundStyle(MeshPalette.muted)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal).padding(.top, 8)
             ScrollView {
                 VStack(alignment: .leading, spacing: 10) {
                     ForEach(secureChat.messages) { message in
@@ -316,19 +333,22 @@ private struct ChatPrototypeView: View {
                 .padding()
             }
             HStack {
-                TextField("Şifreli mesaj yaz…", text: $draft, axis: .vertical)
+                TextField("Çevrimdışı taslak / şifreli mesaj…", text: $draft, axis: .vertical)
                     .textFieldStyle(.roundedBorder)
+                    .onChange(of: draft) { _, value in
+                        secureChat.saveDraft(value, for: secureChat.selectedRecipientFingerprint)
+                    }
                 Button {
-                    guard secureChat.isSecure else { return }
+                    guard secureChat.selectedRecipientFingerprint != nil else { return }
                     secureChat.sendText(draft)
-                    draft = ""
+                    if secureChat.isSecure { draft = ""; secureChat.saveDraft("", for: secureChat.selectedRecipientFingerprint) }
                 } label: {
                     Image(systemName: "paperplane.fill")
                         .foregroundStyle(MeshPalette.background)
                         .padding(12)
                         .background(secureChat.isSecure ? MeshPalette.green : MeshPalette.muted, in: Circle())
                 }
-                .disabled(!secureChat.isSecure || draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                .disabled(secureChat.selectedRecipientFingerprint == nil || draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
             .padding()
         }
