@@ -4,6 +4,10 @@
 
 > **Dürüst durum notu:** Bu dal, Android Bluetooth Classic keşfini, Android sistem eşleştirmesini, doğrudan RFCOMM metin aktarımını ve bu aktarıma bağlı sohbet arayüzünü ekler. Önceki CI çalışması Android debug APK'sını başarıyla derledi; son QR/kriptografi/medya yapı taşı değişiklikleri için yeni CI doğrulaması gerekiyor. İki gerçek telefonda test henüz doğrulanmadı. ECDH/AES-GCM ve QR kimlik yükü yapı taşları eklendi ancak mesaj taşımasına bağlanmadı; bu nedenle uygulama seviyesinde çalışan E2EE henüz yok. Medya parçalama/yeniden birleştirme çekirdeği eklendi ancak Bluetooth'a ve kullanıcı arayüzüne bağlanmadı. Çok atlamalı aktarım için Rust store-and-forward çekirdeği de Android Bluetooth aktarımına bağlı değil. iOS radyo bağlantısı uygulanmadı. Acil durumlarda kullanıma hazır değildir.
 
+## Güvenilir kişiler ve QR tarama durumu
+
+Android uygulamasına QR tarayıcı ve yerel güvenilir kişi kaydı eklendi. Kaydetme ekranı, parmak izini ayrı ve güvenli bir kanaldan karşılaştırma uyarısı verir. Kişi kaydı şu an Bluetooth bağlantısını veya mesaj gönderimini engelleyen zorunlu bir güven kapısı değildir; ECDH/AES-GCM el sıkışması da mevcut Bluetooth satır protokolüne bağlanmış değildir. Bu nedenle uygulama düzeyinde uçtan uca şifreleme (E2EE) tamamlandı olarak değerlendirilmemelidir. Kimlik anahtarının uygulama yeniden başlatmaları arasında kalıcı tutulması da henüz yapılmadı.
+
 ## Android çevrimdışı bağlantı prototipi
 
 İlk aktarım katmanı Bluetooth Classic RFCOMM kullanır. Kullanıcı cihaz aramasını kendisi başlatır; yakındaki cihaz otomatik olarak güvenilir sayılmaz. Kullanıcı cihazı seçmeli ve her iki telefonda da Android sistem eşleştirme isteğini onaylamalıdır. Eşleştirmeden sonra bir telefon gelen bağlantıyı bekler, diğeri bağlanır. İnternet kapalıyken doğrudan metin iletimi hedeflenmiştir.
