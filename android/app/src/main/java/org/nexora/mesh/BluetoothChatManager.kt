@@ -245,7 +245,7 @@ class BluetoothChatManager(context: Context) {
 
     /** Attach the existing QR-trust and encrypted wire protocol to an established BLE packet transport. */
     fun attachBleTransport(peerName: String, sender: (ByteArray) -> Boolean) {
-        closeSocketOnly()
+        closeConnection()
         bleSender = sender
         connectedName = peerName.take(80).ifBlank { "Nexora BLE cihazı" }
         secureChannel = null
