@@ -62,7 +62,6 @@ class BleGattTransport(context: Context) {
         val a = adapter ?: return status("Bluetooth LE desteklenmiyor.")
         if (!a.isEnabled) return status("Önce Bluetooth'u aç.")
         startGattServer()
-        startAdvertising()
         startScan()
     }
 
@@ -174,6 +173,10 @@ class BleGattTransport(context: Context) {
     }
 
     private val serverCallback = object : BluetoothGattServerCallback() {
+        override fun onServiceAdded(statusCode: Int, service: BluetoothGattService) {
+            if (statusCode == BluetoothGatt.GATT_SUCCESS) startAdvertising()
+            else status("BLE GATT servisi eklenemedi: $statusCode")
+        }
         override fun onConnectionStateChange(device: BluetoothDevice, statusCode: Int, newState: Int) {
             status(if (newState == BluetoothProfile.STATE_CONNECTED) "BLE istemcisi bağlandı." else "BLE istemcisi ayrıldı.")
         }
