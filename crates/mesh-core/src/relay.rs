@@ -111,7 +111,11 @@ impl SmartRelayPolicy {
         if !self.may_scan(state) {
             return self.deep_sleep_seconds;
         }
-        if state.app_foreground || state.charging || state.recently_connected || state.urgent_pending {
+        if state.app_foreground
+            || state.charging
+            || state.recently_connected
+            || state.urgent_pending
+        {
             self.foreground_scan_seconds
         } else {
             self.idle_scan_seconds
@@ -196,7 +200,10 @@ impl RelayQueue {
 
     /// Restore replay IDs before accepting radio traffic after process restart.
     pub fn restore_seen(&mut self, ids: &[[u8; 16]]) {
-        for id in ids.iter().skip(ids.len().saturating_sub(self.seen_capacity)) {
+        for id in ids
+            .iter()
+            .skip(ids.len().saturating_sub(self.seen_capacity))
+        {
             self.remember(*id);
         }
     }
@@ -204,7 +211,10 @@ impl RelayQueue {
     /// Return a bounded snapshot suitable for durable app-layer storage.
     /// The snapshot contains opaque ciphertext envelopes only; it does not include keys.
     pub fn persisted_snapshot(&self) -> Result<Vec<Vec<u8>>, crate::wire::WireError> {
-        self.queue.iter().map(crate::wire::encode_envelope).collect()
+        self.queue
+            .iter()
+            .map(crate::wire::encode_envelope)
+            .collect()
     }
 
     /// Restore valid, unexpired envelopes from durable app storage.
@@ -218,7 +228,9 @@ impl RelayQueue {
             if self.queue.len() >= self.capacity {
                 break;
             }
-            let Ok(envelope) = crate::wire::decode_envelope(record) else { continue };
+            let Ok(envelope) = crate::wire::decode_envelope(record) else {
+                continue;
+            };
             if envelope.validate(now_unix) != RelayDecision::Forward
                 || self.seen.contains(&envelope.message_id)
             {
@@ -355,7 +367,13 @@ mod tests {
         assert!(!policy.may_scan(low));
         assert!(!policy.may_relay(low, true));
         assert_eq!(policy.recommended_scan_interval_seconds(low), 300);
-        assert!(!policy.may_relay(RelayPowerState { app_foreground: true, ..low }, false));
+        assert!(!policy.may_relay(
+            RelayPowerState {
+                app_foreground: true,
+                ..low
+            },
+            false
+        ));
     }
 
     #[test]
@@ -363,9 +381,18 @@ mod tests {
         let mut queue = RelayQueue::new(4, 2);
         queue.set_relay_enabled(true);
         queue.restore_seen(&[[1; 16], [2; 16], [3; 16]]);
-        assert_eq!(queue.enqueue(envelope(2, 3, 100), 1), RelayDecision::DropDuplicate);
-        assert_eq!(queue.enqueue(envelope(3, 3, 100), 1), RelayDecision::DropDuplicate);
-        assert_eq!(queue.enqueue(envelope(1, 3, 100), 1), RelayDecision::Forward);
+        assert_eq!(
+            queue.enqueue(envelope(2, 3, 100), 1),
+            RelayDecision::DropDuplicate
+        );
+        assert_eq!(
+            queue.enqueue(envelope(3, 3, 100), 1),
+            RelayDecision::DropDuplicate
+        );
+        assert_eq!(
+            queue.enqueue(envelope(1, 3, 100), 1),
+            RelayDecision::Forward
+        );
     }
 
     #[test]
