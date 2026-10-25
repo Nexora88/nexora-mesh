@@ -94,7 +94,11 @@ final class MeshBLETransport: NSObject, ObservableObject {
             maxPayload = peer.maximumWriteValueLength(for: .withResponse) - Self.headerBytes
             sendAsCentral = true
         } else if !subscribedCentrals.isEmpty, characteristic != nil {
-            maxPayload = peripheralManager.maximumUpdateValueLength - Self.headerBytes
+            guard let subscribedCentral = subscribedCentrals.first else {
+                status = "BLE bildirim alıcısı bulunamadı."
+                return
+            }
+            maxPayload = subscribedCentral.maximumUpdateValueLength - Self.headerBytes
             sendAsCentral = false
         } else {
             status = "Önce çift yönlü BLE bağlantısı kur."
@@ -130,6 +134,17 @@ final class MeshBLETransport: NSObject, ObservableObject {
             notificationOffset = 0
             flushNotifications()
         }
+    }
+
+    private func writeNext(peer: CBPeripheral, characteristic: CBCharacteristic) {
+        guard nextFragmentIndex < pendingWrites.count else {
+            pendingWrites.removeAll()
+            currentTransferID = nil
+            nextFragmentIndex = 0
+            status = "BLE parçaları GATT yazma onayı aldı; uçtan uca teslim onayı değildir."
+            return
+        }
+        peer.writeValue(pendingWrites[nextFragmentIndex], for: characteristic, type: .withResponse)
     }
 
     private func flushNotifications() {
