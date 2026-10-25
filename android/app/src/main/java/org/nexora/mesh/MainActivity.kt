@@ -120,13 +120,13 @@ private fun MeshApp() {
             override fun onPeers(peers: List<BleGattTransport.Peer>) { blePeers = peers }
             override fun onStatus(value: String) { bleStatus = value }
             override fun onPacket(packet: ByteArray) {
-                bleStatus = try {
-                    val code = NativeMesh.validate(packet)
-                    if (code == 0) "Rust doğrulamasından geçen zarf alındı; uygulama mesajı/kimlik doğrulaması henüz bağlı değil."
-                    else "BLE paketi alındı fakat Rust zarf doğrulaması başarısız ($code)."
-                } catch (_: Exception) {
-                    "BLE paketi alındı fakat Rust JNI köprüsü kullanılamıyor."
-                }
+                // GATT packet boundaries feed the same QR-trust, proof-handshake, and AEAD verifier
+                // used by the existing chat protocol. Receiving a packet alone never marks a peer trusted.
+                manager.receiveBlePacket(packet)
+            }
+            override fun onConnected(peerLabel: String) {
+                manager.attachBleTransport(peerLabel) { packet -> bleTransport.sendEnvelope(packet) }
+                bleStatus = "BLE çift yönlü kanal hazır; QR ile güven doğrulaması bekleniyor."
             }
         })
         onDispose {
