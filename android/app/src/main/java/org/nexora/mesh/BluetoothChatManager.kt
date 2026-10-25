@@ -423,6 +423,7 @@ class BluetoothChatManager(context: Context) {
                     if (isNew) {
                         val text = plaintext.toString(StandardCharsets.UTF_8)
                         mainHandler.post { listeners.forEach { it.onMessage(ChatMessage(text, false)) } }
+                    }
                 }
                 "ACK" -> {
                     val channel = secureChannel ?: throw SecurityException("Unverified peer sent acknowledgement")
