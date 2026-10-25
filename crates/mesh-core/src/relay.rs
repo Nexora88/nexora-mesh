@@ -86,8 +86,13 @@ impl RelayQueue {
         }
     }
 
-    pub fn len(&self) -> usize { self.queue.len() }
-    pub fn is_empty(&self) -> bool { self.queue.is_empty() }
+    pub fn len(&self) -> usize {
+        self.queue.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.queue.is_empty()
+    }
 
     /// Accept only a fresh, valid envelope. The caller must supply trusted local time.
     pub fn enqueue(&mut self, envelope: Envelope, now_unix: u64) -> RelayDecision {
@@ -152,23 +157,41 @@ mod tests {
 
     #[test]
     fn expired_and_zero_hop_messages_are_rejected() {
-        assert_eq!(envelope(1, 2, 10).validate(10), RelayDecision::DropExpired);
-        assert_eq!(envelope(2, 0, 100).validate(10), RelayDecision::DropHopLimit);
+        assert_eq!(
+            envelope(1, 2, 10).validate(10),
+            RelayDecision::DropExpired
+        );
+        assert_eq!(
+            envelope(2, 0, 100).validate(10),
+            RelayDecision::DropHopLimit
+        );
     }
 
     #[test]
     fn duplicate_message_ids_are_not_queued_twice() {
         let mut queue = RelayQueue::new(4, 8);
-        assert_eq!(queue.enqueue(envelope(1, 3, 100), 1), RelayDecision::Forward);
-        assert_eq!(queue.enqueue(envelope(1, 3, 100), 1), RelayDecision::DropDuplicate);
+        assert_eq!(
+            queue.enqueue(envelope(1, 3, 100), 1),
+            RelayDecision::Forward
+        );
+        assert_eq!(
+            queue.enqueue(envelope(1, 3, 100), 1),
+            RelayDecision::DropDuplicate
+        );
         assert_eq!(queue.len(), 1);
     }
 
     #[test]
     fn queue_capacity_is_bounded() {
         let mut queue = RelayQueue::new(1, 8);
-        assert_eq!(queue.enqueue(envelope(1, 3, 100), 1), RelayDecision::Forward);
-        assert_eq!(queue.enqueue(envelope(2, 3, 100), 1), RelayDecision::DropOversized);
+        assert_eq!(
+            queue.enqueue(envelope(1, 3, 100), 1),
+            RelayDecision::Forward
+        );
+        assert_eq!(
+            queue.enqueue(envelope(2, 3, 100), 1),
+            RelayDecision::DropOversized
+        );
     }
 
     #[test]
