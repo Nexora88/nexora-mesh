@@ -70,6 +70,7 @@ class BluetoothChatManager(context: Context) {
     private val found = linkedMapOf<String, BluetoothDevice>()
     @Volatile private var scanning = false
     @Volatile private var socket: BluetoothSocket? = null
+    @Volatile private var bleSender: ((ByteArray) -> Boolean)? = null
     @Volatile private var serverSocket: BluetoothServerSocket? = null
     @Volatile private var connectedName: String? = null
     private val running = AtomicBoolean(false)
@@ -240,9 +241,53 @@ class BluetoothChatManager(context: Context) {
         }, "mesh-bt-reader").start()
     }
 
+    /** Attach the existing QR-trust and encrypted wire protocol to an established BLE packet transport. */
+    fun attachBleTransport(peerName: String, sender: (ByteArray) -> Boolean) {
+        closeSocketOnly()
+        bleSender = sender
+        connectedName = peerName.take(80).ifBlank { "Nexora BLE cihazı" }
+        secureChannel = null
+        candidateChannel = null
+        localProofNonce = null
+        remoteProofReceived = false
+        localProofAcked = false
+        remoteIdentity = null
+        remoteFingerprint = null
+        mediaReassemblers.clear()
+        mediaNames.clear()
+        running.set(true)
+        mainHandler.post {
+            listeners.forEach { it.onConnectionChanged(connectedName); it.onSecurityChanged(false, null) }
+            status("BLE bağlı. Mesajlaşma için karşı tarafın QR kimliği doğrulanmalı.")
+        }
+        sendHello()
+    }
+
+    /** Accept one complete bounded BLE packet and route it through the existing protocol verifier. */
+    fun receiveBlePacket(packet: ByteArray) {
+        if (packet.isEmpty() || packet.size > MAX_WIRE_BYTES) {
+            status("BLE paketi boyut sınırını aştığı için reddedildi.")
+            return
+        }
+        val line = try {
+            StandardCharsets.UTF_8.newDecoder()
+                .onMalformedInput(java.nio.charset.CodingErrorAction.REPORT)
+                .onUnmappableCharacter(java.nio.charset.CodingErrorAction.REPORT)
+                .decode(java.nio.ByteBuffer.wrap(packet)).toString()
+        } catch (_: Exception) {
+            status("BLE paketi geçerli UTF-8 değil; reddedildi.")
+            return
+        }
+        if (line.contains('\\n') || line.contains('\\r')) {
+            status("BLE paketinde beklenmeyen satır ayırıcı var; reddedildi.")
+            return
+        }
+        handleWireLine(line)
+    }
+
     fun send(text: String): Boolean {
         if (text.isBlank()) return false
-        if (socket == null) return false
+        if (socket == null && bleSender == null) return false
         val channel = secureChannel ?: run {
             status("Mesaj engellendi: karşı tarafın QR parmak izi doğrulanmadan şifreli kanal açılmaz.")
             return false
@@ -406,7 +451,7 @@ class BluetoothChatManager(context: Context) {
             status("Dosya gönderimi için önce QR parmak izi doğrulaması gerekir.")
             return false
         }
-        if (socket == null) return false
+        if (socket == null && bleSender == null) return false
         return try {
             val safeName = fileName.substringAfterLast('/').substringAfterLast('\\')
                 .replace(Regex("[^A-Za-z0-9._-]"), "_").take(80).ifBlank { "media.bin" }
@@ -495,14 +540,23 @@ class BluetoothChatManager(context: Context) {
     }
 
     private fun sendWire(frame: JSONObject): Boolean {
-        val current = socket ?: return false
+        val encoded = frame.toString().toByteArray(StandardCharsets.UTF_8)
+        if (encoded.isEmpty() || encoded.size > MAX_WIRE_BYTES) return false
+        val current = socket
+        val ble = bleSender
+        if (current == null && ble == null) return false
         return try {
-            synchronized(wireLock) {
-                val bytes = (frame.toString() + "\n").toByteArray(StandardCharsets.UTF_8)
-                current.outputStream.write(bytes)
-                current.outputStream.flush()
+            if (current != null) {
+                synchronized(wireLock) {
+                    current.outputStream.write(encoded)
+                    current.outputStream.write('\\n'.code)
+                    current.outputStream.flush()
+                }
+                true
+            } else {
+                // GATT reassembly supplies the packet boundary; BLE frames do not use newline delimiters.
+                ble?.invoke(encoded) == true
             }
-            true
         } catch (_: Exception) { false }
     }
 
@@ -518,6 +572,7 @@ class BluetoothChatManager(context: Context) {
     fun closeConnection() {
         running.set(false)
         closeSocketOnly()
+        bleSender = null
         try { serverSocket?.close() } catch (_: Exception) { }
         serverSocket = null
         connectedName = null
@@ -550,6 +605,7 @@ class BluetoothChatManager(context: Context) {
         private val DATA_AAD = "NexoraMesh/data/v1".toByteArray(StandardCharsets.UTF_8)
         private val CONTROL_AAD = "NexoraMesh/control/v1".toByteArray(StandardCharsets.UTF_8)
         private val MEDIA_AAD = "NexoraMesh/media/v1".toByteArray(StandardCharsets.UTF_8)
+        private const val MAX_WIRE_BYTES = 256 * 1024
         val SERVICE_UUID: UUID = UUID.fromString("0c4e6c7a-3b12-4b8d-a920-5f0c1a2d7e31")
     }
 }
