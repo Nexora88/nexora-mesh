@@ -54,6 +54,8 @@ class BluetoothChatManager(context: Context) {
     private val identity = IdentityStore(appContext).loadOrCreate()
     private val trustedContacts = TrustedContactStore(appContext)
     private val wireLock = Any()
+    private val replayLock = Any()
+    private val receivedMessageIds = LinkedHashSet<String>()
     @Volatile private var secureChannel: SecureChannel? = null
     @Volatile private var candidateChannel: SecureChannel? = null
     @Volatile private var localProofNonce: String? = null
@@ -253,6 +255,7 @@ class BluetoothChatManager(context: Context) {
         localProofAcked = false
         remoteIdentity = null
         remoteFingerprint = null
+        synchronized(replayLock) { receivedMessageIds.clear() }
         mediaReassemblers.clear()
         mediaNames.clear()
         running.set(true)
@@ -294,9 +297,11 @@ class BluetoothChatManager(context: Context) {
         }
         return try {
             val plaintext = text.trim().toByteArray(StandardCharsets.UTF_8)
-            val sealed = channel.encrypt(plaintext, DATA_AAD)
+            val messageId = UUID.randomUUID().toString().lowercase()
+            val sealed = channel.encrypt(plaintext, dataAad(messageId))
             val frame = JSONObject()
                 .put("t", "DATA")
+                .put("id", messageId)
                 .put("n", Base64.encodeToString(sealed.nonce, Base64.NO_WRAP))
                 .put("c", Base64.encodeToString(sealed.ciphertext, Base64.NO_WRAP))
             if (!sendWire(frame)) false else {
@@ -390,9 +395,12 @@ class BluetoothChatManager(context: Context) {
                 }
                 "DATA" -> {
                     val channel = secureChannel ?: throw SecurityException("Unverified peer sent data")
+                    val messageId = frame.getString("id")
+                    require(messageId.length == 36 && UUID.fromString(messageId).toString() == messageId) { "Invalid message id" }
                     val nonce = Base64.decode(frame.getString("n"), Base64.DEFAULT)
                     val ciphertext = Base64.decode(frame.getString("c"), Base64.DEFAULT)
-                    val plaintext = channel.decrypt(SecureChannel.Sealed(nonce, ciphertext), DATA_AAD)
+                    val plaintext = channel.decrypt(SecureChannel.Sealed(nonce, ciphertext), dataAad(messageId))
+                    require(rememberIncomingMessageId(messageId)) { "Replayed message rejected" }
                     val text = plaintext.toString(StandardCharsets.UTF_8)
                     mainHandler.post { listeners.forEach { it.onMessage(ChatMessage(text, false)) } }
                 }
@@ -539,6 +547,16 @@ class BluetoothChatManager(context: Context) {
         }
     }
 
+    private fun rememberIncomingMessageId(id: String): Boolean = synchronized(replayLock) {
+        if (receivedMessageIds.contains(id)) return@synchronized false
+        receivedMessageIds.add(id)
+        while (receivedMessageIds.size > MAX_REPLAY_IDS) {
+            val oldest = receivedMessageIds.iterator().next()
+            receivedMessageIds.remove(oldest)
+        }
+        true
+    }
+
     private fun sendWire(frame: JSONObject): Boolean {
         val encoded = frame.toString().toByteArray(StandardCharsets.UTF_8)
         if (encoded.isEmpty() || encoded.size > MAX_WIRE_BYTES) return false
@@ -583,6 +601,7 @@ class BluetoothChatManager(context: Context) {
         localProofAcked = false
         remoteIdentity = null
         remoteFingerprint = null
+        synchronized(replayLock) { receivedMessageIds.clear() }
         mediaReassemblers.clear()
         mediaNames.clear()
         mainHandler.post { listeners.forEach { it.onConnectionChanged(null); it.onSecurityChanged(false, null) } }
@@ -602,7 +621,8 @@ class BluetoothChatManager(context: Context) {
     }
 
     companion object {
-        private val DATA_AAD = "NexoraMesh/data/v1".toByteArray(StandardCharsets.UTF_8)
+        private fun dataAad(messageId: String) = "NexoraMesh/data/v1:$messageId".toByteArray(StandardCharsets.UTF_8)
+        private const val MAX_REPLAY_IDS = 4096
         private val CONTROL_AAD = "NexoraMesh/control/v1".toByteArray(StandardCharsets.UTF_8)
         private val MEDIA_AAD = "NexoraMesh/media/v1".toByteArray(StandardCharsets.UTF_8)
         private const val MAX_WIRE_BYTES = 256 * 1024
