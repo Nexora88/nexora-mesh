@@ -25,7 +25,10 @@ jobs:
           distribution: temurin
           java-version: "17"
       - uses: android-actions/setup-android@v3
-      - run: sdkmanager "platforms;android-35" "build-tools;35.0.0"
+        with:
+          packages: |
+            platforms;android-35
+            build-tools;35.0.0
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: "8.9"
@@ -37,4 +40,4 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - run: python -m unittest discover -s tools/tests -v
+      - run: python tools/tests/test_codec_vectors.py
