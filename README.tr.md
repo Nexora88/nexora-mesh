@@ -2,7 +2,7 @@
 
 **Android ve Apple platformları için internet olmadan yakındaki cihazlarla iletişim kurmayı hedefleyen, afet dayanıklılığı odaklı bir mesajlaşma projesi.** Hedefimiz; orman yangını, deprem, sel ve dağ arama-kurtarma gibi bağlantının kesilebildiği koşullarda da işe yarayabilecek güvenilir bir iletişim markası oluşturmaktır.
 
-> **Dürüst durum notu:** Bu dal, Android Bluetooth Classic keşfini, Android sistem eşleştirmesini, doğrudan RFCOMM metin aktarımını ve bu aktarıma bağlı sohbet arayüzünü ekler. Son CI çalışması bu eklemelerle birlikte henüz tamamlanmadı. İki gerçek telefonda test henüz doğrulanmadı. Uygulama seviyesinde uçtan uca şifreleme ve iOS radyo bağlantısı uygulanmadı. Çok atlamalı aktarım için Rust tarafında ilk, sınırlı store-and-forward çekirdeği eklendi; Android Bluetooth aktarımına bağlı değil. Acil durumlarda kullanıma hazır değildir.
+> **Dürüst durum notu:** Bu dal, Android Bluetooth Classic keşfini, Android sistem eşleştirmesini, doğrudan RFCOMM metin aktarımını ve bu aktarıma bağlı sohbet arayüzünü ekler. Önceki CI çalışması Android debug APK'sını başarıyla derledi; son QR/kriptografi/medya yapı taşı değişiklikleri için yeni CI doğrulaması gerekiyor. İki gerçek telefonda test henüz doğrulanmadı. ECDH/AES-GCM ve QR kimlik yükü yapı taşları eklendi ancak mesaj taşımasına bağlanmadı; bu nedenle uygulama seviyesinde çalışan E2EE henüz yok. Medya parçalama/yeniden birleştirme çekirdeği eklendi ancak Bluetooth'a ve kullanıcı arayüzüne bağlanmadı. Çok atlamalı aktarım için Rust store-and-forward çekirdeği de Android Bluetooth aktarımına bağlı değil. iOS radyo bağlantısı uygulanmadı. Acil durumlarda kullanıma hazır değildir.
 
 ## Android çevrimdışı bağlantı prototipi
 
@@ -10,7 +10,7 @@
 
 İki fiziksel cihazla deneme adımları: [Android Bluetooth test rehberi](docs/ANDROID_BLUETOOTH_TEST.md). APK indirme ve sürüm yayımlama: [Android APK rehberi](docs/ANDROID_INSTALL.md).
 
-**Sınırlar:** Aynı anda tek doğrudan bağlantı vardır. Android sistem eşleştirmesi ilk güven kapısıdır; uygulama seviyesinde kimlik doğrulama protokolü değildir. QR/kodla kimlik doğrulama, incelenmiş uçtan uca şifreleme, kalıcı mesaj geçmişi, teslim raporları, Apple uyumluluğu ve gerçek radyo üzerinden mesh aktarma sonraki işlerdir. CI derlemesi gerçek telefonlarda Bluetooth'un çalıştığını kanıtlamaz.
+**Sınırlar:** Aynı anda tek doğrudan bağlantı vardır. Android sistem eşleştirmesi uygulama seviyesinde kimlik doğrulama değildir. Güvenlik sekmesi oturumluk QR açık anahtarını ve parmak izini gösterebilir; QR tarama/kontak kaydetme/doğrulama akışı henüz yoktur. ECDH/AES-GCM ve medya parçalama kodu mevcut Bluetooth taşımasına bağlanmamıştır. Kalıcı mesaj geçmişi, teslim raporları, Apple uyumluluğu ve gerçek radyo üzerinden mesh aktarma tamamlanmamıştır. CI derlemesi gerçek telefonlarda Bluetooth'un çalıştığını kanıtlamaz.
 
 ## Vizyon
 
@@ -37,11 +37,11 @@ Gizlilik varsayılan olmalı. Keşif kullanıcı tarafından başlatılır; yak�
 - [x] CI debug APK artefaktı ve etiket tabanlı GitHub Release iş akışı eklendi
 - [ ] Güncel CI derlemesinin ve relay testlerinin başarıyla tamamlanması
 - [ ] İnternet kapalıyken iki fiziksel Android cihaz arasında çift yönlü mesaj testi
-- [ ] Uygulama seviyesinde kimlik doğrulama ve incelenmiş uçtan uca şifreleme
+- [ ] QR tarama, karşılıklı anahtar doğrulama ve güvenilir kişi kaydetme akışı\n- [ ] ECDH/AES-GCM'i taşıma protokolüne bağlama ve anahtar doğrulamasını zorunlu kılma\n- [ ] Uygulama seviyesinde doğrulanmış uçtan uca şifreleme
 - [ ] Kalıcı sohbet geçmişi ve güvenilir teslim durumu
 - [ ] iOS Xcode projesi ve gerçek cihaz derlemesi
 - [ ] Android Bluetooth taşıyıcısına gerçek multi-hop aktarımının bağlanması ve üç cihaz testi
-- [ ] Dosya, ses ve görüntülü arama
+- [ ] Medya parçalama/yeniden birleştirmeyi Bluetooth aktarımına ve dosya seçici arayüzüne bağlama\n- [ ] Ses ve görüntü için gerçek zamanlı çağrı/codec protokolü
 
 Kaynak kodda bulunması, özelliğin test edilmiş çalışır durumda olduğu anlamına gelmez.
 
