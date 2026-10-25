@@ -6,7 +6,7 @@
 use std::collections::{HashSet, VecDeque};
 
 pub const MAX_CIPHERTEXT_BYTES: usize = 256 * 1024;
-pub const MAX_HOPS: u8 = 8;
+pub const MAX_HOPS: u8 = 5;
 pub const MAX_QUEUE_ITEMS: usize = 128;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
