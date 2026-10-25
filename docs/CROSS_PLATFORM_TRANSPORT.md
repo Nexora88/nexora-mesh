@@ -2,10 +2,12 @@
 
 ## Scope and honest status
 
-The C ABI shim is implemented in `crates/mesh-core/src/ffi.rs`, and the public header is
-`crates/mesh-core/include/nexora_mesh.h`. The shim validates and forwards already-encrypted v1
-envelopes. It is **not yet built into Android JNI or an iOS XCFramework**, and it does not implement
-E2EE, Bluetooth discovery, or radio IO.
+The C ABI shim is implemented in `crates/mesh-core/src/ffi.rs`, with the public header at
+`crates/mesh-core/include/nexora_mesh.h`. Android JNI/CMake wiring and an iOS XCFramework build
+script are present; Android BLE GATT and iOS CoreBluetooth transport source are present. CI builds
+are the first validation layer, not proof of a signed, installable iOS app or physical-device
+interoperability. The transport does **not** implement E2EE, QR identity verification, or a complete
+application message/session protocol. Android's existing live chat still uses Bluetooth Classic.
 
 ## Shared peer trust flow
 
@@ -26,9 +28,11 @@ E2EE, Bluetooth discovery, or radio IO.
 - Data characteristic UUID: `7d2a0002-5b6c-4f10-9a7d-4e45584f5241`
 - Capability characteristic UUID: `7d2a0003-5b6c-4f10-9a7d-4e45584f5241`
 - Advertise only a protocol/service identifier, not a permanent user identifier.
-- Each GATT write/notification carries a fragment record: transfer ID (16 bytes), sequence (u16),
-  total fragments (u16), payload length (u16), bytes. Validate limits before allocating. Use MTU
-  negotiation where available; do not assume an ATT payload size.
+- Each GATT write carries a fragment record: transfer ID (16 bytes), sequence (u16), total fragments
+  (u16), payload length (u16), then bytes. The current Android and iOS sources use this 22-byte
+  header and cap a complete envelope at 256 KiB with at most four incomplete assemblies. These
+  implementations still need expiry/cleanup for stalled assemblies, stress tests, and device-level
+  interoperability checks. Use MTU negotiation where available; do not assume an ATT payload size.
 - Platform BLE APIs deliver arbitrary connection/fragment events. Reassemble with strict memory
   caps, timeout, duplicate/conflict detection, then pass a complete v1 envelope to
   `nm_wire_validate`/the Rust core. All relay traffic must remain opaque ciphertext.
@@ -46,12 +50,13 @@ real three-device delivery.
 
 ## Android and Apple bridge
 
-- Android: compile Rust for each supported Android ABI, package shared libraries, expose a narrow
-  JNI wrapper around the C ABI, and pass complete reassembled envelope bytes only. Do not call
-  native code from Bluetooth callbacks before bounds validation.
-- iOS: build Rust as an XCFramework/static library, import the C header in a module map/bridging
-  header, and call it from Swift after fragment reassembly. CoreBluetooth roles are constrained by
-  iOS background policies; validate foreground and background behavior on real devices.
+- Android: CI compiles Rust shared libraries for `arm64-v8a` and `x86_64`, packages them, and builds
+  the JNI bridge through CMake. BLE GATT reassembles bounded packets before the caller validates
+  them. The APK build is not a substitute for running on phones.
+- iOS: CI builds a Rust XCFramework for device and simulator architectures; Swift source type-check
+  is enabled in CI. This repository currently lacks a complete Xcode app project/signing workflow,
+  so do not describe this as a finished installable iOS application. CoreBluetooth background
+  behavior and real-device interoperability remain unverified.
 - Wi-Fi Direct is not a common Android/iOS transport. Treat it as Android-only optional transport;
   BLE GATT is the cross-platform baseline.
 
@@ -63,6 +68,17 @@ file transfer, integrity hash, bounded queues, cancellation and resume. Live cal
 congestion control, jitter buffer, packet-loss handling, adaptive bitrate and echo cancellation.
 Bluetooth LE may not provide enough bandwidth for useful video. A/B test Wi-Fi Direct (Android)
 or local Wi-Fi when both devices support it; iOS interoperability still needs measurement.
+
+## Current implementation gaps
+
+- BLE transport is not yet connected end-to-end to the QR-trusted-contact gate, encryption/session
+  handshake, chat UI, or durable message store-and-forward queue.
+- The fragment format has no end-to-end delivery acknowledgement, retry/resume protocol, or expiry
+  cleanup for stalled assemblies. A successful GATT write is not proof that a chat message was
+  accepted by the recipient.
+- Android Classic remains the current chat path; BLE is an additional transport prototype.
+- No physical Android↔iPhone roundtrip or three-device A→B→C test has been performed by CI.
+- Voice/video calls and a custom media codec are not implemented.
 
 ## Required release gates
 
