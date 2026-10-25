@@ -3,6 +3,8 @@ package org.nexora.mesh
 import android.Manifest
 import android.os.Build
 import android.os.Bundle
+import android.provider.OpenableColumns
+import java.io.ByteArrayOutputStream
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -89,6 +91,9 @@ private fun MeshApp() {
             override fun onStatus(value: String) { status = value }
             override fun onPeerIdentityPending(contact: ContactQr.Contact) { pendingContact = contact }
             override fun onSecurityChanged(verified: Boolean, fingerprint: String?) { secureChannelActive = verified }
+            override fun onMediaReceived(fileName: String, savedPath: String, sizeBytes: Int) {
+                messages.add(BluetoothChatManager.ChatMessage("Dosya alındı ve bütünlüğü doğrulandı: " + fileName + " (" + sizeBytes + " bayt). Kaydedildi: " + savedPath, false))
+            }
         }
         manager.addListener(listener)
         onDispose {
@@ -100,6 +105,36 @@ private fun MeshApp() {
     val permissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { grants ->
         if (grants.values.all { it }) manager.startDiscovery()
         else status = "Cihaz keşfi için Bluetooth izinleri verilmedi."
+    }
+
+    val mediaPickerLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) {
+            Thread({
+                try {
+                    val name = context.contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { cursor ->
+                        if (cursor.moveToFirst()) cursor.getString(0) else null
+                    } ?: "media.bin"
+                    val output = ByteArrayOutputStream()
+                    context.contentResolver.openInputStream(uri)?.use { input ->
+                        val buffer = ByteArray(8192)
+                        var total = 0
+                        while (true) {
+                            val count = input.read(buffer)
+                            if (count < 0) break
+                            total += count
+                            require(total <= MediaTransferProtocol.MAX_MEDIA_BYTES) { "File exceeds 64 MiB limit" }
+                            output.write(buffer, 0, count)
+                        }
+                    } ?: throw IllegalStateException("Could not open selected file")
+                    require(output.size() > 0) { "Empty files are not supported" }
+                    if (!manager.sendMedia(output.toByteArray(), name)) {
+                        (context as? Activity)?.runOnUiThread { status = "Dosya gönderilemedi; güvenli bağlantıyı ve 64 MiB sınırını kontrol et." }
+                    }
+                } catch (_: Exception) {
+                    (context as? Activity)?.runOnUiThread { status = "Dosya okunamadı veya 64 MiB aktarım sınırını aşıyor." }
+                }
+            }, "mesh-media-send").start()
+        }
     }
     fun scanOrRequest() {
         if (manager.hasPermissions()) manager.startDiscovery()
@@ -125,7 +160,8 @@ private fun MeshApp() {
                         connectionName = connectionName,
                         messages = messages,
                         status = status,
-                        onSend = { text -> if (!manager.send(text)) status = "Mesaj gönderilemedi: önce bir cihaza bağlan." },
+                        onSend = { text -> if (!manager.send(text)) status = "Mesaj gönderilemedi: QR doğrulamalı şifreli bağlantı gerekli." },
+                        onSendMedia = { if (connectionName != null) mediaPickerLauncher.launch(arrayOf("*/*")) else status = "Dosya göndermek için önce bağlan ve QR kimliğini doğrula." },
                         onListen = { if (manager.hasPermissions()) manager.startListening() else scanOrRequest() }
                     )
                     1 -> DevicesScreen(
@@ -177,6 +213,7 @@ private fun ChatScreen(
     messages: SnapshotStateList<BluetoothChatManager.ChatMessage>,
     status: String,
     onSend: (String) -> Unit,
+    onSendMedia: () -> Unit,
     onListen: () -> Unit
 ) {
     var draft by remember { mutableStateOf("") }
@@ -187,6 +224,9 @@ private fun ChatScreen(
             OutlinedButton(onClick = onListen, modifier = Modifier.fillMaxWidth()) { Text("Gelen bağlantıyı bekle") }
         }
         Text(status, color = MeshGreen, fontSize = 12.sp, modifier = Modifier.padding(vertical = 8.dp))
+        OutlinedButton(onClick = onSendMedia, enabled = connectionName != null, modifier = Modifier.fillMaxWidth()) {
+            Text("Dosya / medya gönder (en fazla 64 MiB)")
+        }
         LazyColumn(Modifier.weight(1f).fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             items(messages) { message ->
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = if (message.outgoing) Arrangement.End else Arrangement.Start) {
