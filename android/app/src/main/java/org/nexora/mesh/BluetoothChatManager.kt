@@ -58,6 +58,7 @@ class BluetoothChatManager(context: Context) {
     private val receivedMessageIds = LinkedHashSet<String>()
     private val deliveryPrefs = appContext.getSharedPreferences("mesh_delivery_v1", Context.MODE_PRIVATE)
     private val pendingLock = Any()
+    private val retryAttempts = ConcurrentHashMap<String, Int>()
     private val pendingMessages = LinkedHashMap<String, String>().apply {
         val stored = deliveryPrefs.getString("pending", null)
         if (!stored.isNullOrBlank()) try {
@@ -320,6 +321,7 @@ class BluetoothChatManager(context: Context) {
             val sent = sendWire(frame)
             mainHandler.post { listeners.forEach { it.onMessage(ChatMessage(text.trim(), true)) } }
             if (!sent) status("Mesaj şifrelenip çevrimdışı kuyruğa kaydedildi; teslim onayı bekleniyor.")
+            scheduleDeliveryRetry(messageId, 0)
             true
         } catch (_: Exception) {
             status("Şifreli mesaj gönderilemedi.")
@@ -417,8 +419,7 @@ class BluetoothChatManager(context: Context) {
                     sendDeliveryAck(messageId, channel)
                     if (isNew) {
                         val text = plaintext.toString(StandardCharsets.UTF_8)
-                        mainHandler.post { listeners.forEach { it.onMessage(ChatMessage(text, false)) }
-                    }
+                        mainHandler.post { listeners.forEach { it.onMessage(ChatMessage(text, false)) } }
                 }
                 "ACK" -> {
                     val channel = secureChannel ?: throw SecurityException("Unverified peer sent acknowledgement")
@@ -607,7 +608,26 @@ class BluetoothChatManager(context: Context) {
         synchronized(pendingLock) {
             if (pendingMessages.remove(id) != null) persistPendingLocked()
         }
+        retryAttempts.remove(id)
         status("Teslim onayı alındı: $id")
+    }
+
+    private fun scheduleDeliveryRetry(id: String, attempt: Int) {
+        if (attempt >= MAX_DELIVERY_RETRIES) {
+            status("Teslim onayı gelmedi; mesaj kalıcı kuyrukta tutuluyor: " + id)
+            return
+        }
+        mainHandler.postDelayed({
+            val raw = synchronized(pendingLock) { pendingMessages[id] }
+            if (raw == null) return@postDelayed
+            val channel = secureChannel
+            if (channel != null) {
+                try {
+                    if (sendWire(JSONObject(raw))) retryAttempts[id] = attempt + 1
+                } catch (_: Exception) { }
+            }
+            scheduleDeliveryRetry(id, attempt + 1)
+        }, DELIVERY_RETRY_DELAY_MS)
     }
 
     private fun sendDeliveryAck(id: String, channel: SecureChannel) {
@@ -626,6 +646,7 @@ class BluetoothChatManager(context: Context) {
                 val frame = JSONObject(raw)
                 val id = frame.getString("id")
                 if (!sendWire(frame)) status("Kuyruktaki mesaj gönderilemedi; yeniden denenecek: " + id)
+                scheduleDeliveryRetry(id, 0)
             } catch (_: Exception) { status("Çevrimdışı kuyruk kaydı bozuk; kayıt otomatik silinmedi.") }
         }
         if (pending.isNotEmpty()) status("Kuyruktaki " + pending.size + " mesaj için teslim onayı bekleniyor.")
@@ -697,6 +718,8 @@ class BluetoothChatManager(context: Context) {
     companion object {
         private fun dataAad(messageId: String) = "NexoraMesh/data/v1:$messageId".toByteArray(StandardCharsets.UTF_8)
         private const val MAX_REPLAY_IDS = 4096
+        private const val MAX_DELIVERY_RETRIES = 8
+        private const val DELIVERY_RETRY_DELAY_MS = 2_000L
         private val CONTROL_AAD = "NexoraMesh/control/v1".toByteArray(StandardCharsets.UTF_8)
         private val MEDIA_AAD = "NexoraMesh/media/v1".toByteArray(StandardCharsets.UTF_8)
         private const val MAX_WIRE_BYTES = 256 * 1024
