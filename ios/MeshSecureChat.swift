@@ -12,6 +12,7 @@ final class MeshSecureChat: ObservableObject {
         let outgoing: Bool
         let createdAt: Date
         var delivery: String
+        let recipientFingerprint: String?
         var identifiableId: String { id }
     }
 
@@ -163,7 +164,7 @@ final class MeshSecureChat: ObservableObject {
             try savePending(pending)
             defaults.removeObject(forKey: queuedDraftPrefix + recipient.uppercased())
             try keychainWriteDraft(Data(), account: recipient)
-            messages.append(Message(id: id, text: clean, outgoing: true, createdAt: Date(), delivery: "Teslim bekleniyor"))
+            messages.append(Message(id: id, text: clean, outgoing: true, createdAt: Date(), delivery: "Teslim bekleniyor", recipientFingerprint: recipient))
             sendPacket(raw)
             scheduleRetry(id: id, attempt: 1)
         } catch {
@@ -241,7 +242,8 @@ final class MeshSecureChat: ObservableObject {
                     if received.count > 4096 { received.removeFirst(received.count - 4096) }
                     defaults.set(received, forKey: receivedKey)
                     messages.append(Message(id: id, text: String(decoding: plaintext, as: UTF8.self),
-                                            outgoing: false, createdAt: Date(), delivery: "Alındı"))
+                                            outgoing: false, createdAt: Date(), delivery: "Alındı",
+                                            recipientFingerprint: remoteFingerprint))
                 }
                 sendControl(type: "ACK", payload: ["type": "DELIVERY_ACK", "id": id], key: key)
             default:
@@ -441,7 +443,8 @@ final class MeshSecureChat: ObservableObject {
                   let nonce = frame["n"] as? String, let ciphertext = frame["c"] as? String else { return nil }
             _ = nonce; _ = ciphertext
             return Message(id: item.id, text: "Bekleyen şifreli mesaj", outgoing: true,
-                           createdAt: Date(), delivery: "Teslim bekleniyor")
+                           createdAt: Date(), delivery: "Teslim bekleniyor",
+                           recipientFingerprint: item.recipientFingerprint)
         }
     }
 
