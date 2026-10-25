@@ -7,3 +7,4 @@ description = "Transport-independent protocol primitives for Nexora Mesh"
 
 [lib]
 path = "src/lib.rs"
+crate-type = ["rlib", "cdylib", "staticlib"]
