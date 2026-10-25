@@ -35,6 +35,7 @@ final class MeshSecureChat: ObservableObject {
     private let pendingKey = "mesh_delivery_v1_pending_ios"
     private let receivedKey = "mesh_delivery_v1_received_ios"
     private let contactsKey = "mesh_trusted_contacts_v1_ios"
+    private let queuedDraftPrefix = "mesh_queued_draft_v1_"
     private let controlAAD = Data("NexoraMesh/control/v1".utf8)
     private let messageLimit = 1000
     private var sendPacket: ((Data) -> Void)?
