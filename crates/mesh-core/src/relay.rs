@@ -59,7 +59,7 @@ impl Envelope {
     }
 }
 
-/// Small bounded in-memory queue and duplicate cache for a relay node.
+"+policy+"/// Small bounded in-memory queue and duplicate cache for a relay node.
 /// Persistence and background service integration are intentionally left to the app layer.
 #[derive(Debug)]
 pub struct RelayQueue {
@@ -127,6 +127,36 @@ impl RelayQueue {
         self.remember(envelope.message_id);
         self.queue.push_back(envelope);
         RelayDecision::Forward
+    }
+
+    /// Return a bounded snapshot suitable for durable app-layer storage.
+    /// The snapshot contains opaque ciphertext envelopes only; it does not include keys.
+    pub fn persisted_snapshot(&self) -> Result<Vec<Vec<u8>>, crate::wire::WireError> {
+        self.queue.iter().map(crate::wire::encode_envelope).collect()
+    }
+
+    /// Restore valid, unexpired envelopes from durable app storage.
+    /// Call only after the user opts in to relaying. Invalid records are skipped.
+    pub fn restore_persisted(&mut self, records: &[Vec<u8>], now_unix: u64) -> usize {
+        if !self.relay_enabled {
+            return 0;
+        }
+        let mut restored = 0;
+        for record in records {
+            if self.queue.len() >= self.capacity {
+                break;
+            }
+            let Ok(envelope) = crate::wire::decode_envelope(record) else { continue };
+            if envelope.validate(now_unix) != RelayDecision::Forward
+                || self.seen.contains(&envelope.message_id)
+            {
+                continue;
+            }
+            self.remember(envelope.message_id);
+            self.queue.push_back(envelope);
+            restored += 1;
+        }
+        restored
     }
 
     pub fn pop_next(&mut self, now_unix: u64) -> Option<Envelope> {
@@ -238,6 +268,38 @@ mod tests {
         assert_eq!(queue.pop_next(10).unwrap().message_id, [2; 16]);
         assert!(queue.is_empty());
     }
+
+    #[test]
+    fn smart_relay_policy_sleeps_on_low_battery_and_respects_opt_in() {
+        let policy = SmartRelayPolicy::default();
+        let low = RelayPowerState {
+            battery_percent: 8,
+            charging: false,
+            low_power_mode: true,
+            app_foreground: false,
+            recently_connected: false,
+            urgent_pending: false,
+        };
+        assert!(!policy.may_scan(low));
+        assert!(!policy.may_relay(low, true));
+        assert_eq!(policy.recommended_scan_interval_seconds(low), 300);
+        assert!(!policy.may_relay(RelayPowerState { app_foreground: true, ..low }, false));
+    }
+
+    #[test]
+    fn persisted_queue_restores_only_valid_envelopes_after_opt_in() {
+        let mut source = RelayQueue::new(4, 8);
+        source.set_relay_enabled(true);
+        source.enqueue(envelope(9, 3, 100), 1);
+        let records = source.persisted_snapshot().unwrap();
+
+        let mut target = RelayQueue::new(4, 8);
+        assert_eq!(target.restore_persisted(&records, 2), 0);
+        target.set_relay_enabled(true);
+        assert_eq!(target.restore_persisted(&records, 2), 1);
+        assert_eq!(target.pop_next(2).unwrap().message_id, [9; 16]);
+    }
+
     #[test]
     fn three_node_store_and_forward_simulation_preserves_opaque_payload() {
         let sent = envelope(77, 3, 100);
