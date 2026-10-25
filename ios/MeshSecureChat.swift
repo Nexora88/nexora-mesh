@@ -136,13 +136,15 @@ final class MeshSecureChat: ObservableObject {
         }
         guard let sessionKey, isSecure,
               remoteFingerprint?.caseInsensitiveCompare(recipient) == .orderedSame else {
-            status = "Taslak korundu. Yalnızca seçili alıcıyla güvenli oturum kurulunca gönderilebilir."
+            status = "Taslak korundu; güvenli oturum kurulunca gönderim kuyruğuna alınacak."
             saveDraft(clean, for: recipient)
+            defaults.set(true, forKey: queuedDraftPrefix + recipient.uppercased())
             return
         }
         guard let sendPacket else {
             status = "Taslak korundu; bağlantı yok."
             saveDraft(clean, for: recipient)
+            defaults.set(true, forKey: queuedDraftPrefix + recipient.uppercased())
             return
         }
         var pending = loadPending()
@@ -158,6 +160,8 @@ final class MeshSecureChat: ObservableObject {
             let raw = try JSONSerialization.data(withJSONObject: frame, options: [.sortedKeys])
             pending.append(Pending(id: id, frame: raw, recipientFingerprint: recipient))
             try savePending(pending)
+            defaults.removeObject(forKey: queuedDraftPrefix + recipient.uppercased())
+            try keychainWriteDraft(Data(), account: recipient)
             messages.append(Message(id: id, text: clean, outgoing: true, createdAt: Date(), delivery: "Teslim bekleniyor"))
             sendPacket(raw)
             scheduleRetry(id: id, attempt: 1)
@@ -350,6 +354,16 @@ final class MeshSecureChat: ObservableObject {
         isSecure = true
         status = "QR doğrulamalı AES-GCM oturumu etkin."
         flushPending()
+        if let recipient = selectedRecipientFingerprint,
+           recipient.caseInsensitiveCompare(remoteFingerprint ?? "") == .orderedSame,
+           defaults.bool(forKey: queuedDraftPrefix + recipient.uppercased()) {
+            let draft = loadDraft(for: recipient)
+            if !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                sendText(draft)
+            } else {
+                defaults.removeObject(forKey: queuedDraftPrefix + recipient.uppercased())
+            }
+        }
     }
 
     private func sendHello() {
