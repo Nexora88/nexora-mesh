@@ -59,16 +59,26 @@ class BluetoothChatManager(context: Context) {
     private val deliveryPrefs = appContext.getSharedPreferences("mesh_delivery_v1", Context.MODE_PRIVATE)
     private val pendingLock = Any()
     private val retryAttempts = ConcurrentHashMap<String, Int>()
-    private val pendingMessages = LinkedHashMap<String, String>().apply {
-        val stored = deliveryPrefs.getString("pending", null)
-        if (!stored.isNullOrBlank()) try {
-            val array = org.json.JSONArray(stored)
-            for (i in 0 until array.length()) {
-                val item = array.getJSONObject(i)
-                put(item.getString("id"), item.getString("frame"))
-            }
-        } catch (_: Exception) { clear() }
-    }
+    private val pendingMessages = PendingDeliveryQueue(
+        initial = run {
+            val restored = LinkedHashMap<String, String>()
+            val stored = deliveryPrefs.getString("pending", null)
+            if (!stored.isNullOrBlank()) try {
+                val array = org.json.JSONArray(stored)
+                for (i in 0 until array.length()) {
+                    val item = array.getJSONObject(i)
+                    restored[item.getString("id")] = item.getString("frame")
+                }
+            } catch (_: Exception) { restored.clear() }
+            restored
+        },
+        maxSize = MAX_PENDING_MESSAGES,
+        persist = { snapshot ->
+            val array = org.json.JSONArray()
+            snapshot.forEach { (id, frame) -> array.put(JSONObject().put("id", id).put("frame", frame)) }
+            deliveryPrefs.edit().putString("pending", array.toString()).commit()
+        }
+    )
     @Volatile private var secureChannel: SecureChannel? = null
     @Volatile private var candidateChannel: SecureChannel? = null
     @Volatile private var localProofNonce: String? = null
@@ -597,27 +607,17 @@ class BluetoothChatManager(context: Context) {
         true
     }
 
-    private fun persistPendingLocked(): Boolean {
-        val array = org.json.JSONArray()
-        pendingMessages.forEach { (id, frame) -> array.put(JSONObject().put("id", id).put("frame", frame)) }
-        return deliveryPrefs.edit().putString("pending", array.toString()).commit()
-    }
-
-    private fun enqueuePending(id: String, frame: JSONObject): Boolean = synchronized(pendingLock) {
-        if (!pendingMessages.containsKey(id) && pendingMessages.size >= MAX_PENDING_MESSAGES) return@synchronized false
-        pendingMessages[id] = frame.toString()
-        if (persistPendingLocked()) true else {
-            pendingMessages.remove(id)
-            false
-        }
-    }
+    private fun enqueuePending(id: String, frame: JSONObject): Boolean =
+        synchronized(pendingLock) { pendingMessages.enqueue(id, frame.toString()) }
 
     private fun acknowledgePending(id: String) {
-        synchronized(pendingLock) {
-            if (pendingMessages.remove(id) != null) persistPendingLocked()
+        val persisted = synchronized(pendingLock) { pendingMessages.acknowledge(id) }
+        if (persisted) {
+            retryAttempts.remove(id)
+            status("Teslim onayı alındı: $id")
+        } else {
+            status("Teslim onayı kalıcı kaydedilemedi; mesaj kuyruğunda tutuluyor: $id")
         }
-        retryAttempts.remove(id)
-        status("Teslim onayı alındı: $id")
     }
 
     private fun scheduleDeliveryRetry(id: String, attempt: Int) {
@@ -631,7 +631,7 @@ class BluetoothChatManager(context: Context) {
             return
         }
         mainHandler.postDelayed({
-            val raw = synchronized(pendingLock) { pendingMessages[id] }
+            val raw = synchronized(pendingLock) { pendingMessages.get(id) }
             if (raw == null) {
                 retryAttempts.remove(id)
                 return@postDelayed
@@ -656,7 +656,7 @@ class BluetoothChatManager(context: Context) {
     }
 
     private fun flushPendingMessages(channel: SecureChannel) {
-        val pending = synchronized(pendingLock) { pendingMessages.values.toList() }
+        val pending = synchronized(pendingLock) { pendingMessages.frames() }
         pending.forEach { raw ->
             try {
                 val frame = JSONObject(raw)
