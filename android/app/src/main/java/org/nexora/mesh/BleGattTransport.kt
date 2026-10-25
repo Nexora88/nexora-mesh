@@ -41,6 +41,7 @@ class BleGattTransport(context: Context) {
         fun onStatus(status: String)
         fun onPacket(packet: ByteArray)
         fun onConnected(peerLabel: String) {}
+        fun onDisconnected() {}
     }
 
     private val app = context.applicationContext
@@ -214,6 +215,7 @@ class BleGattTransport(context: Context) {
                     serverPeerReady = false
                     synchronized(lock) { pendingNotifications.clear() }
                 }
+                listener?.onDisconnected()
                 status("BLE istemcisi ayrıldı.")
             }
         }
@@ -264,6 +266,7 @@ class BleGattTransport(context: Context) {
             } else {
                 g.close()
                 if (gatt === g) gatt = null
+                listener?.onDisconnected()
                 status("BLE bağlantısı kapandı.")
             }
         }
