@@ -196,7 +196,7 @@ impl RelayQueue {
 
     /// Restore replay IDs before accepting radio traffic after process restart.
     pub fn restore_seen(&mut self, ids: &[[u8; 16]]) {
-        for id in ids.iter().rev().take(self.seen_capacity) {
+        for id in ids.iter().skip(ids.len().saturating_sub(self.seen_capacity)) {
             self.remember(*id);
         }
     }
@@ -356,6 +356,16 @@ mod tests {
         assert!(!policy.may_relay(low, true));
         assert_eq!(policy.recommended_scan_interval_seconds(low), 300);
         assert!(!policy.may_relay(RelayPowerState { app_foreground: true, ..low }, false));
+    }
+
+    #[test]
+    fn replay_restore_keeps_most_recent_ids_when_bounded() {
+        let mut queue = RelayQueue::new(4, 2);
+        queue.set_relay_enabled(true);
+        queue.restore_seen(&[[1; 16], [2; 16], [3; 16]]);
+        assert_eq!(queue.enqueue(envelope(2, 3, 100), 1), RelayDecision::DropDuplicate);
+        assert_eq!(queue.enqueue(envelope(3, 3, 100), 1), RelayDecision::DropDuplicate);
+        assert_eq!(queue.enqueue(envelope(1, 3, 100), 1), RelayDecision::Forward);
     }
 
     #[test]
