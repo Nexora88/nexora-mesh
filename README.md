@@ -2,7 +2,7 @@
 
 **An offline-first messenger project for Android and Apple platforms, designed with resilient communication in mind.** The long-term goal is a trustworthy messenger that can help people communicate when connectivity is disrupted by wildfires, earthquakes, floods, or mountain search-and-rescue operations.
 
-> **Honest status:** Early prototype. This branch adds Android Bluetooth Classic discovery, Android system pairing, a direct RFCOMM text transport, and a chat UI wired to that transport. It has not yet passed CI or two-physical-device testing. App-level end-to-end encryption, mesh relaying, and Apple transport interoperability are not implemented. This is not ready for emergency use.
+> **Honest status:** Android Bluetooth Classic chat remains the current live chat path. This branch adds a Rust C ABI, Android JNI/CMake bridge, Android BLE GATT discovery/connection prototype, iOS CoreBluetooth GATT source, a Swift C ABI wrapper, and an XCFramework build script. BLE is not yet wired end-to-end to the QR-gated encrypted chat protocol. Android CI for the new native bridge is still running; the iOS sources have not been built in Xcode here. No physical Android–iPhone or three-device relay tests have been performed. Audio/video calls and a custom codec are not implemented. This is not ready for emergency use.
 
 ## Product vision
 
