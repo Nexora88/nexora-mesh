@@ -28,3 +28,16 @@ targets:
         PRODUCT_NAME: NexoraMesh
         CODE_SIGNING_ALLOWED: "NO"
         SWIFT_EMIT_LOC_STRINGS: "YES"
+
+  NexoraMeshTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - path: ../iosTests
+    dependencies:
+      - target: NexoraMesh
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: org.nexora.mesh.tests
+        GENERATE_INFOPLIST_FILE: "YES"
+        CODE_SIGNING_ALLOWED: "NO"
