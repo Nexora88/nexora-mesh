@@ -1,0 +1,4 @@
+module MeshCore {
+    header "nexora_mesh.h"
+    export *
+}
