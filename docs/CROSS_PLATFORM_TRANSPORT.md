@@ -52,10 +52,11 @@ real three-device delivery.
 - Android: CI compiles Rust shared libraries for `arm64-v8a` and `x86_64`, packages them, and builds
   the JNI bridge through CMake. BLE GATT reassembles bounded packets before the caller validates
   them. The APK build is not a substitute for running on phones.
-- iOS: CI builds a Rust XCFramework for device and simulator architectures; Swift source type-check
-  is enabled in CI. This repository currently lacks a complete Xcode app project/signing workflow,
-  so do not describe this as a finished installable iOS application. CoreBluetooth background
-  behavior and real-device interoperability remain unverified.
+- iOS: `ios/project.yml` defines the app target and CI generates an Xcode project with XcodeGen,
+  then attempts a simulator build without code signing. The Rust XCFramework is built for device
+  and simulator architectures. A green simulator build validates compilation only: it does not
+  establish a signed/release-ready app, QR trust integration, compatible encrypted sessions, or
+  physical-device interoperability. CoreBluetooth background behavior remains unverified.
 - Wi-Fi Direct is not a common Android/iOS transport. Treat it as Android-only optional transport;
   BLE GATT is the cross-platform baseline.
 
