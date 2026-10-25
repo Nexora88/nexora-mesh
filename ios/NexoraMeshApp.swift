@@ -1,4 +1,6 @@
 import SwiftUI
+import CoreImage.CIFilterBuiltins
+import UIKit
 
 private enum MeshPalette {
     static let background = Color(red: 7 / 255, green: 17 / 255, blue: 15 / 255)
@@ -40,8 +42,11 @@ private struct ChatItem: Identifiable {
 
 struct MeshRootView: View {
     @StateObject private var bleTransport = MeshBLETransport()
+    @StateObject private var secureChat = MeshSecureChat()
     @State private var selectedTab: MeshTab = .chats
     @State private var selectedChat: ChatItem?
+    @State private var qrPayloadInput = ""
+    @State private var qrTrustStatus = ""
 
     private let chats = [
         ChatItem(title: "Yerel notlar", detail: "Nexora Mesh'e hoş geldin", initials: "NM"),
@@ -54,7 +59,7 @@ struct MeshRootView: View {
             VStack(spacing: 0) {
                 header
                 if let chat = selectedChat {
-                    ChatPrototypeView(chat: chat) { selectedChat = nil }
+                    ChatPrototypeView(chat: chat, secureChat: secureChat) { selectedChat = nil }
                 } else {
                     Group {
                         switch selectedTab {
@@ -69,6 +74,16 @@ struct MeshRootView: View {
             }
         }
         .preferredColorScheme(.dark)
+        .onAppear {
+            bleTransport.onPacket = { packet in
+                DispatchQueue.main.async { secureChat.receive(packet) }
+            }
+        }
+        .onChange(of: bleTransport.status) { _, newStatus in
+            if newStatus.contains("BLE veri kanalı hazır") || newStatus.contains("Bir BLE istemcisi bildirimlere abone oldu") {
+                secureChat.attach { packet in bleTransport.send(envelope: packet) }
+            }
+        }
     }
 
     private var header: some View {
@@ -182,6 +197,40 @@ struct MeshRootView: View {
             infoCard("Afetlerde dayanıklılık", "Orman yangını, deprem, sel ve dağ arama-kurtarma ekipleri için internet kesilse de yerel iletişim hedefleniyor. Bu uygulama şu an acil durum haberleşme aracı değildir.", symbol: "cross.case")
             infoCard("Menzil", "Bluetooth tek başına uzak mesafeyi garanti etmez. Daha geniş kapsama için Wi-Fi Direct ve izinli ara cihazlar üzerinden çok atlamalı aktarım araştırılacak.", symbol: "point.3.connected.trianglepath.dotted")
             infoCard("Platformlar", "Android ilk geliştirme hedefi. Bu SwiftUI dosyası Apple platformları için başlangıç arayüzüdür; Xcode projesi, radyo katmanı ve iOS cihaz testleri ayrıca tamamlanmalıdır.", symbol: "iphone.and.arrow.forward")
+            VStack(alignment: .leading, spacing: 10) {
+                Text("Kimlik ve QR güveni").font(.headline).foregroundStyle(.white)
+                Text("Bu cihazın QR içeriğini karşı tarafa aktar. Diğer kişinin QR içeriğini buraya yapıştırıp parmak izini doğrulayarak güvenilir kişi olarak ekle.")
+                    .font(.caption).foregroundStyle(MeshPalette.muted)
+                if let payload = try? secureChat.localQRPayload() {
+                    QRCodeView(payload: payload).frame(width: 160, height: 160).frame(maxWidth: .infinity)
+                    Button("Kendi QR içeriğini kopyala") {
+                        UIPasteboard.general.string = payload
+                    }.buttonStyle(.borderedProminent).tint(MeshPalette.green).foregroundStyle(MeshPalette.background)
+                }
+                TextField("NEXORAMESH: QR içeriğini yapıştır", text: $qrPayloadInput, axis: .vertical)
+                    .textFieldStyle(.roundedBorder)
+                Button("QR kimliğini doğrula ve kaydet") {
+                    do {
+                        try secureChat.trustQRPayload(qrPayloadInput.trimmingCharacters(in: .whitespacesAndNewlines))
+                        qrTrustStatus = "Kimlik doğrulandı ve güvenilir kişi listesine eklendi."
+                        qrPayloadInput = ""
+                    } catch {
+                        qrTrustStatus = "QR reddedildi: içerik veya parmak izi geçersiz."
+                    }
+                }
+                .buttonStyle(.borderedProminent).tint(MeshPalette.green).foregroundStyle(MeshPalette.background)
+                Text(qrTrustStatus.isEmpty ? secureChat.status : qrTrustStatus)
+                    .font(.caption).foregroundStyle(MeshPalette.muted)
+                ForEach(secureChat.trustedContacts, id: \.fingerprint) { contact in
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(contact.label).foregroundStyle(.white)
+                        Text(contact.fingerprint).font(.system(.caption2, design: .monospaced)).foregroundStyle(MeshPalette.green)
+                    }.padding(10).frame(maxWidth: .infinity, alignment: .leading)
+                     .background(MeshPalette.background, in: RoundedRectangle(cornerRadius: 10))
+                }
+            }
+            .padding(16)
+            .background(MeshPalette.surface, in: RoundedRectangle(cornerRadius: 18))
             Spacer()
         }
         .padding(.horizontal, 18)
@@ -226,9 +275,9 @@ struct MeshRootView: View {
 
 private struct ChatPrototypeView: View {
     let chat: ChatItem
+    @ObservedObject var secureChat: MeshSecureChat
     let onBack: () -> Void
     @State private var draft = ""
-    @State private var localMessages: [String] = ["Bu ekran bir arayüz prototipidir; mesajlar başka cihaza iletilmez."]
 
     var body: some View {
         VStack(spacing: 0) {
@@ -236,43 +285,78 @@ private struct ChatPrototypeView: View {
                 Button("‹", action: onBack).font(.largeTitle).foregroundStyle(MeshPalette.green)
                 VStack(alignment: .leading) {
                     Text(chat.title).font(.headline).foregroundStyle(.white)
-                    Text("Yerel prototip · bağlantı yok").font(.caption).foregroundStyle(MeshPalette.muted)
+                    Text(secureChat.isSecure ? "QR doğrulamalı şifreli oturum" : "Güvenli oturum bekleniyor")
+                        .font(.caption).foregroundStyle(MeshPalette.muted)
                 }
                 Spacer()
+                Image(systemName: secureChat.isSecure ? "lock.fill" : "lock.open")
+                    .foregroundStyle(secureChat.isSecure ? MeshPalette.green : MeshPalette.muted)
             }
             .padding()
             .background(MeshPalette.surface)
+            Text(secureChat.status)
+                .font(.caption).foregroundStyle(MeshPalette.muted)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal).padding(.top, 8)
             ScrollView {
                 VStack(alignment: .leading, spacing: 10) {
-                    ForEach(Array(localMessages.enumerated()), id: \.offset) { _, message in
-                        Text(message)
-                            .foregroundStyle(.white)
-                            .padding(12)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .background(MeshPalette.surface, in: RoundedRectangle(cornerRadius: 14))
+                    ForEach(secureChat.messages) { message in
+                        VStack(alignment: message.outgoing ? .trailing : .leading, spacing: 4) {
+                            Text(message.text)
+                                .foregroundStyle(.white)
+                                .padding(12)
+                                .frame(maxWidth: .infinity, alignment: message.outgoing ? .trailing : .leading)
+                                .background(message.outgoing ? Color(red: 25 / 255, green: 72 / 255, blue: 52 / 255) : MeshPalette.surface,
+                                            in: RoundedRectangle(cornerRadius: 14))
+                            Text(message.delivery)
+                                .font(.caption2).foregroundStyle(MeshPalette.muted)
+                        }
                     }
                 }
                 .padding()
             }
-            Text("Gönder düğmesi yalnızca bu ekrana yerel metin ekler.")
-                .font(.caption2)
-                .foregroundStyle(MeshPalette.muted)
-                .padding(.horizontal)
             HStack {
-                TextField("Mesaj yaz…", text: $draft, axis: .vertical)
+                TextField("Şifreli mesaj yaz…", text: $draft, axis: .vertical)
                     .textFieldStyle(.roundedBorder)
                 Button {
-                    guard !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
-                    localMessages.append(draft)
+                    guard secureChat.isSecure else { return }
+                    secureChat.sendText(draft)
                     draft = ""
                 } label: {
                     Image(systemName: "paperplane.fill")
                         .foregroundStyle(MeshPalette.background)
                         .padding(12)
-                        .background(MeshPalette.green, in: Circle())
+                        .background(secureChat.isSecure ? MeshPalette.green : MeshPalette.muted, in: Circle())
                 }
+                .disabled(!secureChat.isSecure || draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
             .padding()
         }
+    }
+}
+
+private struct QRCodeView: View {
+    let payload: String
+    private let context = CIContext()
+    private let filter = CIFilter.qrCodeGenerator()
+
+    var body: some View {
+        Group {
+            if let image = makeImage() {
+                Image(uiImage: image).interpolation(.none).resizable().scaledToFit()
+                    .padding(8).background(.white, in: RoundedRectangle(cornerRadius: 12))
+            } else {
+                Image(systemName: "qrcode").resizable().scaledToFit().foregroundStyle(MeshPalette.muted)
+            }
+        }
+    }
+
+    private func makeImage() -> UIImage? {
+        filter.message = Data(payload.utf8)
+        filter.correctionLevel = "M"
+        guard let output = filter.outputImage else { return nil }
+        let transform = CGAffineTransform(scaleX: 4, y: 4)
+        guard let cgImage = context.createCGImage(output.transformed(by: transform), from: output.extent.applying(transform)) else { return nil }
+        return UIImage(cgImage: cgImage)
     }
 }
