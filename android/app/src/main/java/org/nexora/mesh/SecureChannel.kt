@@ -25,6 +25,10 @@ import java.security.SecureRandom
  */
 class SecureChannel private constructor(private val key: ByteArray) {
     data class Sealed(val nonce: ByteArray, val ciphertext: ByteArray)
+    data class IdentityKeyPair internal constructor(val keyPair: KeyPair) {
+        val publicKeyBase64: String get() = Base64.encodeToString(keyPair.public.encoded, Base64.NO_WRAP)
+        val fingerprint: String get() = SecureChannel.fingerprint(keyPair.public.encoded)
+    }
 
     fun encrypt(plaintext: ByteArray, associatedData: ByteArray = byteArrayOf()): Sealed {
         val nonce = ByteArray(12).also { SecureRandom().nextBytes(it) }
@@ -43,11 +47,6 @@ class SecureChannel private constructor(private val key: ByteArray) {
     }
 
     companion object {
-        data class IdentityKeyPair internal constructor(val keyPair: KeyPair) {
-            val publicKeyBase64: String get() = Base64.encodeToString(keyPair.public.encoded, Base64.NO_WRAP)
-            val fingerprint: String get() = fingerprint(keyPair.public.encoded)
-        }
-
         fun newIdentityKeyPair(): IdentityKeyPair {
             val generator = KeyPairGenerator.getInstance("EC")
             generator.initialize(ECGenParameterSpec("secp256r1"))
