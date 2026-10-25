@@ -281,7 +281,7 @@ class BluetoothChatManager(context: Context) {
             status("BLE paketi geçerli UTF-8 değil; reddedildi.")
             return
         }
-        if (line.contains('\\n') || line.contains('\\r')) {
+        if (line.contains('\n') || line.contains('\r')) {
             status("BLE paketinde beklenmeyen satır ayırıcı var; reddedildi.")
             return
         }
@@ -567,7 +567,7 @@ class BluetoothChatManager(context: Context) {
             if (current != null) {
                 synchronized(wireLock) {
                     current.outputStream.write(encoded)
-                    current.outputStream.write('\\n'.code)
+                    current.outputStream.write('\n'.code)
                     current.outputStream.flush()
                 }
                 true
