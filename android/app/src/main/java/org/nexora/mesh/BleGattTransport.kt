@@ -6,6 +6,7 @@ import android.bluetooth.BluetoothDevice
 import android.bluetooth.BluetoothGatt
 import android.bluetooth.BluetoothGattCallback
 import android.bluetooth.BluetoothGattCharacteristic
+import android.bluetooth.BluetoothGattDescriptor
 import android.bluetooth.BluetoothGattServer
 import android.bluetooth.BluetoothGattServerCallback
 import android.bluetooth.BluetoothGattService
@@ -39,6 +40,7 @@ class BleGattTransport(context: Context) {
         fun onPeers(peers: List<Peer>)
         fun onStatus(status: String)
         fun onPacket(packet: ByteArray)
+        fun onConnected(peerLabel: String) {}
     }
 
     private val app = context.applicationContext
@@ -52,6 +54,10 @@ class BleGattTransport(context: Context) {
     @Volatile private var dataCharacteristic: BluetoothGattCharacteristic? = null
     @Volatile private var mtu = 23
     private val pendingWrites = ArrayDeque<ByteArray>()
+    private val pendingNotifications = ArrayDeque<ByteArray>()
+    @Volatile private var serverPeer: BluetoothDevice? = null
+    @Volatile private var serverPeerReady = false
+    @Volatile private var notificationInFlight = false
     private val lock = Any()
 
     private data class Assembly(val count: Int, val createdAtMs: Long = android.os.SystemClock.elapsedRealtime(), val chunks: MutableMap<Int, ByteArray> = mutableMapOf(), var bytes: Int = 0)
@@ -73,7 +79,10 @@ class BleGattTransport(context: Context) {
         try { gattServer?.close() } catch (_: Exception) {}
         gattServer = null
         assemblies.clear()
-        synchronized(lock) { pendingWrites.clear() }
+        synchronized(lock) { pendingWrites.clear(); pendingNotifications.clear() }
+        serverPeer = null
+        serverPeerReady = false
+        notificationInFlight = false
         status("BLE taşıması durduruldu.")
     }
 
@@ -92,7 +101,6 @@ class BleGattTransport(context: Context) {
             status("Zarf boş veya 256 KiB sınırını aşıyor.")
             return false
         }
-        val current = gatt ?: return false
         val characteristic = dataCharacteristic ?: return false
         val maxPayload = (mtu - 3 - HEADER_BYTES).coerceAtLeast(1)
         val transfer = ByteArray(16).also { java.security.SecureRandom().nextBytes(it) }
@@ -105,8 +113,21 @@ class BleGattTransport(context: Context) {
                 .put(transfer).putShort(index.toShort()).putShort(total.toShort())
                 .putShort((end - start).toShort()).put(envelope, start, end - start).array()
         }
-        synchronized(lock) { pendingWrites.clear(); pendingWrites.addAll(fragments) }
-        return writeNext(current, characteristic)
+        val current = gatt
+        if (current != null) {
+            synchronized(lock) { pendingWrites.clear(); pendingWrites.addAll(fragments) }
+            return writeNext(current, characteristic)
+        }
+        synchronized(lock) {
+            if (!serverPeerReady || serverPeer == null) return false
+            if (pendingNotifications.size + fragments.size > 8192) {
+                status("BLE bildirim kuyruğu dolu; yeni paket kabul edilmedi.")
+                return false
+            }
+            pendingNotifications.addAll(fragments)
+        }
+        notifyNext()
+        return true
     }
 
     private fun writeNext(current: BluetoothGatt, characteristic: BluetoothGattCharacteristic): Boolean {
@@ -133,9 +154,11 @@ class BleGattTransport(context: Context) {
         val service = BluetoothGattService(SERVICE_UUID, BluetoothGattService.SERVICE_TYPE_PRIMARY)
         val characteristic = BluetoothGattCharacteristic(
             DATA_UUID,
-            BluetoothGattCharacteristic.PROPERTY_WRITE or BluetoothGattCharacteristic.PROPERTY_WRITE_NO_RESPONSE,
+            BluetoothGattCharacteristic.PROPERTY_WRITE or BluetoothGattCharacteristic.PROPERTY_WRITE_NO_RESPONSE or BluetoothGattCharacteristic.PROPERTY_NOTIFY,
             BluetoothGattCharacteristic.PERMISSION_WRITE
         )
+        characteristic.addDescriptor(BluetoothGattDescriptor(CCCD_UUID,
+            BluetoothGattDescriptor.PERMISSION_READ or BluetoothGattDescriptor.PERMISSION_WRITE))
         service.addCharacteristic(characteristic)
         dataCharacteristic = characteristic
         gattServer = manager.openGattServer(app, serverCallback)?.also { it.addService(service) }
@@ -178,7 +201,42 @@ class BleGattTransport(context: Context) {
             else status("BLE GATT servisi eklenemedi: $statusCode")
         }
         override fun onConnectionStateChange(device: BluetoothDevice, statusCode: Int, newState: Int) {
-            status(if (newState == BluetoothProfile.STATE_CONNECTED) "BLE istemcisi bağlandı." else "BLE istemcisi ayrıldı.")
+            if (newState == BluetoothProfile.STATE_CONNECTED) {
+                serverPeer = device
+                serverPeerReady = false
+                status("BLE istemcisi bağlandı; bildirim izni bekleniyor.")
+            } else {
+                if (serverPeer?.address == device.address) {
+                    serverPeer = null
+                    serverPeerReady = false
+                    synchronized(lock) { pendingNotifications.clear() }
+                }
+                status("BLE istemcisi ayrıldı.")
+            }
+        }
+        override fun onDescriptorWriteRequest(device: BluetoothDevice, requestId: Int,
+            descriptor: BluetoothGattDescriptor, preparedWrite: Boolean, responseNeeded: Boolean,
+            offset: Int, value: ByteArray) {
+            val valid = descriptor.uuid == CCCD_UUID && !preparedWrite && offset == 0 &&
+                value.contentEquals(BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE)
+            if (valid) {
+                descriptor.value = value
+                serverPeer = device
+                serverPeerReady = true
+                listener?.onConnected(try { device.name ?: device.address } catch (_: Exception) { device.address })
+                status("BLE çift yönlü kanal hazır; QR güven doğrulaması gerekli.")
+            }
+            if (responseNeeded) gattServer?.sendResponse(device, requestId,
+                if (valid) BluetoothGatt.GATT_SUCCESS else BluetoothGatt.GATT_REQUEST_NOT_SUPPORTED, offset, null)
+        }
+        override fun onNotificationSent(device: BluetoothDevice, statusCode: Int) {
+            notificationInFlight = false
+            if (statusCode != BluetoothGatt.GATT_SUCCESS) {
+                synchronized(lock) { pendingNotifications.clear() }
+                status("BLE bildirimi gönderilemedi; aktarım kuyruğu temizlendi.")
+                return
+            }
+            notifyNext()
         }
         override fun onCharacteristicWriteRequest(device: BluetoothDevice, requestId: Int,
             characteristic: BluetoothGattCharacteristic, preparedWrite: Boolean, responseNeeded: Boolean,
@@ -214,7 +272,30 @@ class BleGattTransport(context: Context) {
             val characteristic = service?.getCharacteristic(DATA_UUID)
             if (characteristic == null) return status("Nexora BLE GATT servisi bulunamadı.")
             dataCharacteristic = characteristic
-            status("BLE veri kanalı hazır. QR kimliği doğrulanmadan içerik gönderilmemeli.")
+            if (characteristic.properties and BluetoothGattCharacteristic.PROPERTY_NOTIFY != 0) {
+                g.setCharacteristicNotification(characteristic, true)
+                val descriptor = characteristic.getDescriptor(CCCD_UUID)
+                if (descriptor == null) return status("BLE bildirim tanımlayıcısı eksik.")
+                descriptor.value = BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE
+                if (!g.writeDescriptor(descriptor)) return status("BLE bildirim aboneliği başlatılamadı.")
+            } else {
+                status("Karşı cihaz çift yönlü BLE bildirimi desteklemiyor.")
+            }
+        }
+        override fun onDescriptorWrite(g: BluetoothGatt, descriptor: BluetoothGattDescriptor, statusCode: Int) {
+            if (statusCode != BluetoothGatt.GATT_SUCCESS || descriptor.uuid != CCCD_UUID) {
+                return status("BLE bildirim aboneliği başarısız.")
+            }
+            listener?.onConnected(try { g.device.name ?: g.device.address } catch (_: Exception) { g.device.address })
+            status("BLE çift yönlü kanal hazır; QR güven doğrulaması gerekli.")
+        }
+        override fun onCharacteristicChanged(g: BluetoothGatt, characteristic: BluetoothGattCharacteristic) {
+            @Suppress("DEPRECATION")
+            val value = characteristic.value ?: return
+            if (characteristic.uuid == DATA_UUID) acceptFragment(value)
+        }
+        override fun onCharacteristicChanged(g: BluetoothGatt, characteristic: BluetoothGattCharacteristic, value: ByteArray) {
+            if (characteristic.uuid == DATA_UUID) acceptFragment(value)
         }
         override fun onCharacteristicWrite(g: BluetoothGatt, characteristic: BluetoothGattCharacteristic, statusCode: Int) {
             if (statusCode != BluetoothGatt.GATT_SUCCESS) return status("BLE parçası gönderilemedi.")
@@ -259,11 +340,35 @@ class BleGattTransport(context: Context) {
         return true
     }
 
+    private fun notifyNext() {
+        val peer = serverPeer ?: return
+        val characteristic = dataCharacteristic ?: return
+        val next = synchronized(lock) {
+            if (!serverPeerReady || notificationInFlight || pendingNotifications.isEmpty()) null
+            else pendingNotifications.removeFirst().also { notificationInFlight = true }
+        } ?: return
+        try {
+            @Suppress("DEPRECATION")
+            characteristic.value = next
+            @Suppress("DEPRECATION")
+            val accepted = gattServer?.notifyCharacteristicChanged(peer, characteristic, false) == true
+            if (!accepted) {
+                notificationInFlight = false
+                synchronized(lock) { pendingNotifications.addFirst(next) }
+                status("BLE bildirimi kuyruğa geri alındı; bağlantı hazır değil.")
+            }
+        } catch (_: Exception) {
+            notificationInFlight = false
+            status("BLE bildirimi gönderilirken hata oluştu.")
+        }
+    }
+
     private fun status(value: String) { listener?.onStatus(value) }
 
     companion object {
         val SERVICE_UUID: UUID = UUID.fromString("7d2a0001-5b6c-4f10-9a7d-4e45584f5241")
         val DATA_UUID: UUID = UUID.fromString("7d2a0002-5b6c-4f10-9a7d-4e45584f5241")
+        private val CCCD_UUID: UUID = UUID.fromString("00002902-0000-1000-8000-00805f9b34fb")
         private const val HEADER_BYTES = 22
         private const val MAX_ENVELOPE = 256 * 1024
         private const val MAX_INCOMPLETE = 4
