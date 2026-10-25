@@ -4,7 +4,7 @@ import CryptoKit
 
 final class MeshSecureChatCryptoTests: XCTestCase {
     func testSharedV1KDFVectorMatchesAndroidContract() {
-        let secret = Data(0..<32)
+        let secret = Data((0..<32).map { UInt8($0) })
         let expected = "f686564b5419341dd9eaa8bcfa472c607e046069d08e66243c97a0fa180d0162"
         let key = MeshSecureChat.deriveSessionKey(sharedSecret: secret)
         let actual = key.withUnsafeBytes { Data($0).map { String(format: "%02x", $0) }.joined() }
