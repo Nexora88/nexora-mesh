@@ -2,7 +2,7 @@
 
 **Android ve Apple platformları için internet olmadan yakındaki cihazlarla iletişim kurmayı hedefleyen, afet dayanıklılığı odaklı bir mesajlaşma projesi.** Hedefimiz; orman yangını, deprem, sel ve dağ arama-kurtarma gibi bağlantının kesilebildiği koşullarda da işe yarayabilecek güvenilir bir iletişim markası oluşturmaktır.
 
-> **Dürüst durum notu:** Bu dal, Android Bluetooth Classic keşfini, Android sistem eşleştirmesini, doğrudan RFCOMM metin aktarımını ve bu aktarıma bağlı sohbet arayüzünü ekler. Önceki CI çalışması Android debug APK'sını başarıyla derledi; son QR/kriptografi/medya yapı taşı değişiklikleri için yeni CI doğrulaması gerekiyor. İki gerçek telefonda test henüz doğrulanmadı. ECDH/AES-GCM ve QR kimlik yükü yapı taşları eklendi ancak mesaj taşımasına bağlanmadı; bu nedenle uygulama seviyesinde çalışan E2EE henüz yok. Medya parçalama/yeniden birleştirme çekirdeği eklendi ancak Bluetooth'a ve kullanıcı arayüzüne bağlanmadı. Çok atlamalı aktarım için Rust store-and-forward çekirdeği de Android Bluetooth aktarımına bağlı değil. iOS radyo bağlantısı uygulanmadı. Acil durumlarda kullanıma hazır değildir.
+> **Dürüst durum notu:** Android tarafında Bluetooth Classic RFCOMM doğrudan sohbet prototipi, QR/kişi güven akışı ve ECDH/AES-GCM ile dosya parçalama yapı taşları bulunuyor; bunlar bağımsız güvenlik denetiminden ve gerçek cihaz doğrulamasından geçmiş üretim protokolü değildir. Rust tarafına beş atlamalı zarf biçimi ve C ABI doğrulama/iletme giriş noktaları eklendi. Ancak C ABI henüz Android JNI veya iOS XCFramework olarak paketlenmedi; Android BLE GATT ve iOS CoreBluetooth radyo taşıması uygulanmadı. Gerçek üç cihaz A→B→C ve Android–iPhone testleri yapılmadı. Sesli/görüntülü arama ve özel codec yoktur. Acil durumlarda kullanıma hazır değildir.
 
 ## Güvenilir kişiler ve QR tarama durumu
 
@@ -14,7 +14,7 @@ Android uygulamasına QR tarayıcı ve yerel güvenilir kişi kaydı eklendi. Ka
 
 Güvenlik sekmesinde cihaz kimliği kalıcıdır: özel anahtar, Android Keystore tarafından korunan AES-GCM anahtarıyla şifrelenerek yerel depoda tutulur. Kişi QR kodu taranıp açıkça kaydedilir. Bağlantı, karşı tarafın HELLO mesajındaki açık anahtarın kaydedilmiş QR parmak iziyle eşleşmesi olmadan mesaj göndermez. Eşleşme sonrası doğrudan metin ve 1–64 MiB dosyalar ECDH/AES-GCM kanalı üzerinden gönderilir; dosyalar 16 KiB parçalara bölünür ve alıcıda SHA-256 ile doğrulanır.
 
-Bu, bağımsız güvenlik denetimi yapılmış bir mesajlaşma sistemi değildir. CI derlemesi fiziksel cihazda radyo bağlantısını kanıtlamaz. Test adımları: [Android Bluetooth, E2EE ve medya test rehberi](docs/ANDROID_BLUETOOTH_TEST.md). APK indirme: [Android APK rehberi](docs/ANDROID_INSTALL.md).
+Bu, bağımsız güvenlik denetimi yapılmış bir mesajlaşma sistemi değildir. CI derlemesi fiziksel cihazda radyo bağlantısını kanıtlamaz. Şifreli kanalın üretim güvenliği ve protokol bağlaması ayrıca doğrulanmalıdır. Test adımları: [Android Bluetooth, E2EE ve medya test rehberi](docs/ANDROID_BLUETOOTH_TEST.md). APK indirme: [Android APK rehberi](docs/ANDROID_INSTALL.md).
 
 **Sınırlar:** Aynı anda tek doğrudan Bluetooth Classic bağlantısı vardır. A→B→C gerçek çok atlamalı aktarım henüz Android taşımasına bağlı değildir. Dosya aktarımında devam ettirme ve teslim onayı yoktur. iOS CoreBluetooth/Android BLE ortak taşıması ve iPhone–Android fiziksel testi tamamlanmamıştır. Sesli/görüntülü arama, kalıcı sohbet geçmişi ve bağımsız güvenlik incelemesi yoktur.
 
@@ -28,7 +28,7 @@ Bu, bağımsız güvenlik denetimi yapılmış bir mesajlaşma sistemi değildir
 
 ## Cihaz keşfi ve güven
 
-Gizlilik varsayılan olmalı. Keşif kullanıcı tarafından başlatılır; yakındaki cihazı görmek onu otomatik olarak güvenilir kişi yapmaz. İlk sürüm Android sistem eşleştirmesini kullanır. Sonraki aşamada iki taraflı doğrulama kodu veya QR parmak izi eklenmelidir. Bluetooth adı veya adresi tek başına kriptografik kimlik değildir.
+Gizlilik varsayılan olmalı. Keşif kullanıcı tarafından başlatılır; yakındaki cihazı görmek onu otomatik olarak güvenilir kişi yapmaz. Android prototipinde QR tarama ve kişi kaydı var; uygulama güven kapısının tüm protokol yollarında zorunlu olduğu ve kimliğin iki platform arasında doğrulandığı henüz kanıtlanmadı. Bluetooth adı veya adresi tek başına kriptografik kimlik değildir. Ortak BLE GATT / JNI / Swift köprüsü için sözleşme: [Cross-platform transport](docs/CROSS_PLATFORM_TRANSPORT.md).
 
 ## Mevcut durum
 
