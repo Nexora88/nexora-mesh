@@ -11,6 +11,7 @@ settings:
     GENERATE_INFOPLIST_FILE: "YES"
     INFOPLIST_KEY_NSBluetoothAlwaysUsageDescription: "Nexora Mesh, yakındaki cihazlarla yerel bağlantı kurmak için Bluetooth kullanır."
     INFOPLIST_KEY_NSBluetoothPeripheralUsageDescription: "Nexora Mesh, yakındaki cihazlarla yerel bağlantı kurmak için Bluetooth kullanır."
+    INFOPLIST_KEY_NSCameraUsageDescription: "Nexora Mesh, güvenilir cihaz QR kodlarını tarayıp kimlik parmak izini doğrulamak için kamerayı kullanır."
 targets:
   NexoraMesh:
     type: application
