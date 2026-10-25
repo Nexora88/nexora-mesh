@@ -70,9 +70,14 @@ class SecureChannel private constructor(private val key: ByteArray) {
             val sharedSecret = agreement.generateSecret()
             // Domain-separated HMAC-SHA-256 KDF. Both peers must use the same
             // canonical public-key ordering; callers should pass initiator first.
+            return SecureChannel(deriveKeyFromSharedSecret(sharedSecret))
+        }
+
+        internal fun deriveKeyFromSharedSecret(sharedSecret: ByteArray): ByteArray {
             val mac = Mac.getInstance("HmacSHA256")
             mac.init(SecretKeySpec("NexoraMesh/session-key/v1".toByteArray(Charsets.UTF_8), "HmacSHA256"))
-            return SecureChannel(mac.doFinal(sharedSecret))
+            return mac.doFinal(sharedSecret)
+
         }
     }
 }
