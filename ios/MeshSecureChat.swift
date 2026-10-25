@@ -27,6 +27,8 @@ final class MeshSecureChat: ObservableObject {
     @Published private(set) var remoteFingerprint: String?
     @Published private(set) var isSecure = false
     @Published private(set) var trustedContacts: [Contact] = []
+    @Published var selectedRecipientFingerprint: String?
+    @Published private(set) var draftStatus = ""
 
     private let identityTag = "org.nexora.mesh.identity.v1"
     private let defaults = UserDefaults.standard
@@ -46,7 +48,33 @@ final class MeshSecureChat: ObservableObject {
     init() {
         trustedContacts = (try? JSONDecoder().decode([Contact].self, from: defaults.data(forKey: contactsKey) ?? Data())) ?? []
         _ = try? localPublicKeyDER()
+        selectedRecipientFingerprint = trustedContacts.first?.fingerprint
         restorePendingMessages()
+    }
+
+    func selectRecipient(_ fingerprint: String?) {
+        selectedRecipientFingerprint = fingerprint
+    }
+
+    func loadDraft(for fingerprint: String?) -> String {
+        guard let fingerprint else { return "" }
+        do {
+            let data = try keychainReadDraft(account: fingerprint)
+            return data.flatMap { String(data: $0, encoding: .utf8) } ?? ""
+        } catch {
+            draftStatus = "Taslak güvenli depodan okunamadı."
+            return ""
+        }
+    }
+
+    func saveDraft(_ text: String, for fingerprint: String?) {
+        guard let fingerprint else { draftStatus = "Taslak için önce güvenilir alıcı seç."; return }
+        do {
+            try keychainWriteDraft(Data(text.utf8), account: fingerprint)
+            draftStatus = "Taslak bu alıcının Keychain alanına kaydedildi."
+        } catch {
+            draftStatus = "Taslak güvenli depoya kaydedilemedi."
+        }
     }
 
     func attach(send: @escaping (Data) -> Void) {
@@ -102,12 +130,19 @@ final class MeshSecureChat: ObservableObject {
     func sendText(_ text: String) {
         let clean = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !clean.isEmpty else { return }
-        guard let sessionKey, isSecure else {
-            status = "Mesaj gönderilmedi: QR doğrulaması ve güvenli oturum gerekli."
+        guard let recipient = selectedRecipientFingerprint else {
+            status = "Mesaj gönderilmedi: önce güvenilir alıcı seç."
+            return
+        }
+        guard let sessionKey, isSecure,
+              remoteFingerprint?.caseInsensitiveCompare(recipient) == .orderedSame else {
+            status = "Taslak korundu. Yalnızca seçili alıcıyla güvenli oturum kurulunca gönderilebilir."
+            saveDraft(clean, for: recipient)
             return
         }
         guard let sendPacket else {
-            status = "Bağlantı yok; mesaj henüz kuyruğa alınmadı."
+            status = "Taslak korundu; bağlantı yok."
+            saveDraft(clean, for: recipient)
             return
         }
         var pending = loadPending()
@@ -121,7 +156,7 @@ final class MeshSecureChat: ObservableObject {
                 "c": sealed.ciphertext.base64EncodedString()
             ]
             let raw = try JSONSerialization.data(withJSONObject: frame, options: [.sortedKeys])
-            pending.append(Pending(id: id, frame: raw))
+            pending.append(Pending(id: id, frame: raw, recipientFingerprint: recipient))
             try savePending(pending)
             messages.append(Message(id: id, text: clean, outgoing: true, createdAt: Date(), delivery: "Teslim bekleniyor"))
             sendPacket(raw)
@@ -212,7 +247,12 @@ final class MeshSecureChat: ObservableObject {
         }
     }
 
-    private struct Pending: Codable { let id: String; let frame: Data }
+    private struct Pending: Codable {
+        let id: String
+        let frame: Data
+        // Optional so records from earlier experimental builds still decode.
+        let recipientFingerprint: String?
+    }
 
     private func localPrivateKey() throws -> SecKey {
         let query: [String: Any] = [
@@ -327,8 +367,48 @@ final class MeshSecureChat: ObservableObject {
     }
 
     private func flushPending() {
-        guard let sendPacket else { return }
-        for item in loadPending() { sendPacket(item.frame); scheduleRetry(id: item.id, attempt: 1) }
+        guard let sendPacket, let remoteFingerprint else { return }
+        // Never flush a stored frame to a different trusted recipient.
+        for item in loadPending() where item.recipientFingerprint?.caseInsensitiveCompare(remoteFingerprint) == .orderedSame {
+            sendPacket(item.frame)
+            scheduleRetry(id: item.id, attempt: 1)
+        }
+    }
+
+    private func keychainReadDraft(account: String) throws -> Data? {
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: "org.nexora.mesh.drafts.v1",
+            kSecAttrAccount as String: account,
+            kSecAttrAccessible as String: kSecAttrAccessibleWhenUnlockedThisDeviceOnly,
+            kSecReturnData as String: true
+        ]
+        var item: CFTypeRef?
+        let result = SecItemCopyMatching(query as CFDictionary, &item)
+        if result == errSecItemNotFound { return nil }
+        guard result == errSecSuccess else { throw MeshSecureChatError.keyStore }
+        return item as? Data
+    }
+
+    private func keychainWriteDraft(_ data: Data, account: String) throws {
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: "org.nexora.mesh.drafts.v1",
+            kSecAttrAccount as String: account
+        ]
+        let update: [String: Any] = [
+            kSecValueData as String: data,
+            kSecAttrAccessible as String: kSecAttrAccessibleWhenUnlockedThisDeviceOnly
+        ]
+        let result = SecItemUpdate(query as CFDictionary, update as CFDictionary)
+        if result == errSecItemNotFound {
+            var insert = query
+            update.forEach { insert[$0.key] = $0.value }
+            let added = SecItemAdd(insert as CFDictionary, nil)
+            guard added == errSecSuccess else { throw MeshSecureChatError.keyStore }
+        } else if result != errSecSuccess {
+            throw MeshSecureChatError.keyStore
+        }
     }
 
     private func scheduleRetry(id: String, attempt: Int) {
