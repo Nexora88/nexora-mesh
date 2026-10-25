@@ -56,6 +56,18 @@ class BluetoothChatManager(context: Context) {
     private val wireLock = Any()
     private val replayLock = Any()
     private val receivedMessageIds = LinkedHashSet<String>()
+    private val deliveryPrefs = appContext.getSharedPreferences("mesh_delivery_v1", Context.MODE_PRIVATE)
+    private val pendingLock = Any()
+    private val pendingMessages = LinkedHashMap<String, String>().apply {
+        val stored = deliveryPrefs.getString("pending", null)
+        if (!stored.isNullOrBlank()) try {
+            val array = org.json.JSONArray(stored)
+            for (i in 0 until array.length()) {
+                val item = array.getJSONObject(i)
+                put(item.getString("id"), item.getString("frame"))
+            }
+        } catch (_: Exception) { clear() }
+    }
     @Volatile private var secureChannel: SecureChannel? = null
     @Volatile private var candidateChannel: SecureChannel? = null
     @Volatile private var localProofNonce: String? = null
@@ -304,10 +316,11 @@ class BluetoothChatManager(context: Context) {
                 .put("id", messageId)
                 .put("n", Base64.encodeToString(sealed.nonce, Base64.NO_WRAP))
                 .put("c", Base64.encodeToString(sealed.ciphertext, Base64.NO_WRAP))
-            if (!sendWire(frame)) false else {
-                mainHandler.post { listeners.forEach { it.onMessage(ChatMessage(text.trim(), true)) } }
-                true
-            }
+            enqueuePending(messageId, frame)
+            val sent = sendWire(frame)
+            mainHandler.post { listeners.forEach { it.onMessage(ChatMessage(text.trim(), true)) } }
+            if (!sent) status("Mesaj şifrelenip çevrimdışı kuyruğa kaydedildi; teslim onayı bekleniyor.")
+            true
         } catch (_: Exception) {
             status("Şifreli mesaj gönderilemedi.")
             false
@@ -400,9 +413,22 @@ class BluetoothChatManager(context: Context) {
                     val nonce = Base64.decode(frame.getString("n"), Base64.DEFAULT)
                     val ciphertext = Base64.decode(frame.getString("c"), Base64.DEFAULT)
                     val plaintext = channel.decrypt(SecureChannel.Sealed(nonce, ciphertext), dataAad(messageId))
-                    require(rememberIncomingMessageId(messageId)) { "Replayed message rejected" }
-                    val text = plaintext.toString(StandardCharsets.UTF_8)
-                    mainHandler.post { listeners.forEach { it.onMessage(ChatMessage(text, false)) } }
+                    val isNew = rememberIncomingMessageId(messageId)
+                    sendDeliveryAck(messageId, channel)
+                    if (isNew) {
+                        val text = plaintext.toString(StandardCharsets.UTF_8)
+                        mainHandler.post { listeners.forEach { it.onMessage(ChatMessage(text, false)) }
+                    }
+                }
+                "ACK" -> {
+                    val channel = secureChannel ?: throw SecurityException("Unverified peer sent acknowledgement")
+                    val nonce = Base64.decode(frame.getString("n"), Base64.DEFAULT)
+                    val ciphertext = Base64.decode(frame.getString("c"), Base64.DEFAULT)
+                    val control = JSONObject(channel.decrypt(SecureChannel.Sealed(nonce, ciphertext), CONTROL_AAD).toString(StandardCharsets.UTF_8))
+                    require(control.getString("type") == "DELIVERY_ACK")
+                    val messageId = control.getString("id")
+                    require(messageId.length == 36 && UUID.fromString(messageId).toString() == messageId)
+                    acknowledgePending(messageId)
                 }
                 "MEDIA" -> {
                     val channel = secureChannel ?: throw SecurityException("Unverified peer sent media")
@@ -541,6 +567,7 @@ class BluetoothChatManager(context: Context) {
         if (!remoteProofReceived || !localProofAcked) return
         secureChannel = candidate
         val fingerprint = remoteFingerprint
+        flushPendingMessages(candidate)
         mainHandler.post {
             listeners.forEach { it.onSecurityChanged(true, fingerprint) }
             status("Anahtar sahipliği doğrulandı; ECDH + AES-GCM uçtan uca şifreli kanal etkin.")
@@ -548,13 +575,60 @@ class BluetoothChatManager(context: Context) {
     }
 
     private fun rememberIncomingMessageId(id: String): Boolean = synchronized(replayLock) {
+        val stored = deliveryPrefs.getString("received_ids", null)
+        if (receivedMessageIds.isEmpty() && !stored.isNullOrBlank()) try {
+            val array = org.json.JSONArray(stored)
+            for (i in 0 until array.length()) receivedMessageIds.add(array.getString(i))
+        } catch (_: Exception) { receivedMessageIds.clear() }
         if (receivedMessageIds.contains(id)) return@synchronized false
         receivedMessageIds.add(id)
         while (receivedMessageIds.size > MAX_REPLAY_IDS) {
             val oldest = receivedMessageIds.iterator().next()
             receivedMessageIds.remove(oldest)
         }
+        val array = org.json.JSONArray()
+        receivedMessageIds.forEach { array.put(it) }
+        deliveryPrefs.edit().putString("received_ids", array.toString()).commit()
         true
+    }
+
+    private fun persistPendingLocked() {
+        val array = org.json.JSONArray()
+        pendingMessages.forEach { (id, frame) -> array.put(JSONObject().put("id", id).put("frame", frame)) }
+        deliveryPrefs.edit().putString("pending", array.toString()).commit()
+    }
+
+    private fun enqueuePending(id: String, frame: JSONObject) = synchronized(pendingLock) {
+        pendingMessages[id] = frame.toString()
+        persistPendingLocked()
+    }
+
+    private fun acknowledgePending(id: String) {
+        synchronized(pendingLock) {
+            if (pendingMessages.remove(id) != null) persistPendingLocked()
+        }
+        status("Teslim onayı alındı: $id")
+    }
+
+    private fun sendDeliveryAck(id: String, channel: SecureChannel) {
+        val payload = JSONObject().put("type", "DELIVERY_ACK").put("id", id)
+            .toString().toByteArray(StandardCharsets.UTF_8)
+        val sealed = channel.encrypt(payload, CONTROL_AAD)
+        sendWire(JSONObject().put("t", "ACK")
+            .put("n", Base64.encodeToString(sealed.nonce, Base64.NO_WRAP))
+            .put("c", Base64.encodeToString(sealed.ciphertext, Base64.NO_WRAP)))
+    }
+
+    private fun flushPendingMessages(channel: SecureChannel) {
+        val pending = synchronized(pendingLock) { pendingMessages.values.toList() }
+        pending.forEach { raw ->
+            try {
+                val frame = JSONObject(raw)
+                val id = frame.getString("id")
+                if (!sendWire(frame)) status("Kuyruktaki mesaj gönderilemedi; yeniden denenecek: " + id)
+            } catch (_: Exception) { status("Çevrimdışı kuyruk kaydı bozuk; kayıt otomatik silinmedi.") }
+        }
+        if (pending.isNotEmpty()) status("Kuyruktaki " + pending.size + " mesaj için teslim onayı bekleniyor.")
     }
 
     private fun sendWire(frame: JSONObject): Boolean {
