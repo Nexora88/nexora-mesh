@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="tr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#07110f">
+  <meta name="description" content="Nexora Mesh — çevrimdışı mesajlaşma için cihaz ve bağlantı yönetim konsolu.">
+  <link rel="manifest" href="./manifest.webmanifest">
+  <link rel="icon" href="./icon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="./styles.css">
+  <title>Nexora Mesh — Yerel İletişim</title>
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar">
+      <a class="brand" href="#" aria-label="Nexora Mesh ana sayfa"><span class="brand-mark">N</span><span>NEXORA <b>MESH</b><small>OFFLINE COMMUNICATION</small></span></a>
+      <div class="nav-label">ÇALIŞMA ALANI</div>
+      <button class="nav-item active" data-view="chats"><span>◫</span> Sohbetler <i id="chat-count">0</i></button>
+      <button class="nav-item" data-view="devices"><span>⌁</span> Yakındaki cihazlar</button>
+      <button class="nav-item" data-view="relay"><span>⤳</span> Mesh / Relay</button>
+      <button class="nav-item" data-view="settings"><span>⚙</span> Güvenlik ve ayarlar</button>
+      <div class="sidebar-bottom"><span class="status-dot"></span><div><b>Yerel konsol</b><small id="bridge-status">Native radyo köprüsü bağlı değil</small></div></div>
+    </aside>
+    <main class="main">
+      <header class="topbar"><div><div class="eyebrow">NEXORA MESH / LOCAL NETWORK</div><h1 id="page-title">Sohbetler</h1></div><div class="top-actions"><span class="pill"><span class="status-dot"></span> İnternet gerektirmez*</span><button id="install-btn" class="button secondary" hidden>Uygulamayı yükle</button><button id="new-chat" class="button primary">＋ Yeni sohbet</button></div></header>
+      <section class="notice"><strong>Prototip durumu</strong><span>Bu web konsolu kurulabilir ve çevrimdışı açılabilir. Tarayıcıdan Bluetooth üzerinden gerçek mesaj gönderimi henüz bağlı değil; canlı iletişim için yerel native köprü gerekir.</span></section>
+      <section id="view-chats" class="view">
+        <div class="stats"><article><small>GÜVENİLİR KİŞİ</small><b id="trusted-count">0</b><span>Bu tarayıcı profilinde</span></article><article><small>BEKLEYEN TASLAK</small><b id="draft-count">0</b><span>Yalnızca bu cihazda</span></article><article><small>RELAY DURUMU</small><b>Kapalı</b><span>İzin verilmeden aktarım yok</span></article></div>
+        <div class="workspace"><div class="panel contact-panel"><div class="panel-head"><div><h2>Kişiler</h2><p>QR ile tanıdığın cihazlar</p></div><button id="add-contact" class="icon-button" title="Kişi ekle">＋</button></div><div id="contact-list" class="contact-list"><div class="empty"><span>⌁</span><b>Henüz güvenilir cihaz yok</b><p>Karşı tarafın QR kimliğini ekleyerek yerel kişi kaydı oluştur.</p></div></div></div>
+        <div class="panel conversation"><div class="conversation-head"><div class="avatar large">NM</div><div><h2 id="conversation-title">Yerel notlar</h2><p id="conversation-subtitle">Taslaklar yalnızca bu tarayıcıda tutulur</p></div><span class="secure-tag">◈ UÇTAN UCA: KÖPRÜ GEREKLİ</span></div><div id="messages" class="messages"><div class="welcome"><div class="orb">N</div><h2>Mesajlaşmaya hazırla</h2><p>Önce QR kimliğini ekle. Gerçek mesaj gönderimi, native radyo köprüsü bağlanıp güvenli oturum doğrulanana kadar devre dışıdır.</p><button class="button secondary" id="welcome-add">QR ile cihaz tanı</button></div></div><form id="composer" class="composer"><textarea id="message-input" rows="1" placeholder="Önce güvenilir bir kişi seç…" disabled maxlength="4000"></textarea><button class="send-button" type="submit" disabled aria-label="Gönder">↑</button><div class="composer-foot"><span id="compose-status">Çevrimdışı taslak alanı</span><span>Enter göndermez · Shift+Enter yeni satır</span></div></form></div></div>
+      </section>
+      <section id="view-devices" class="view" hidden><div class="section-intro"><div><h2>Cihaz tanıma</h2><p>QR parmak izini karşı tarafla farklı bir kanaldan karşılaştır. Bu web ekranı tek başına Bluetooth taraması yapmaz.</p></div></div><div class="panel form-panel"><label for="contact-name">Cihaz adı</label><input id="contact-name" maxlength="40" placeholder="Örn. Ahmet'in telefonu"><label for="contact-fingerprint">QR kimliği / parmak izi</label><textarea id="contact-fingerprint" rows="4" placeholder="NEXORAMESH:… QR payload yapıştır"></textarea><div class="form-actions"><button id="save-contact" class="button primary">Kişiyi yerel kaydet</button><button id="clear-contact" class="button secondary">Temizle</button></div><p id="contact-feedback" class="feedback" role="status"></p><p class="warning">Önemli: Bu PWA, yapıştırılan QR metnini kaydeder; native uygulamanın kriptografik imza ve parmak izi doğrulamasının yerine geçmez. Bu kayıt, tek başına güven kanıtı değildir.</p></div></section>
+      <section id="view-relay" class="view" hidden><div class="section-intro"><div><h2>Store-and-forward / Mesh</h2><p>Şifreli paketi aracı cihazda saklama ve daha sonra iletme için kontrol alanı.</p></div><span class="pill warning-pill">Hazırlık aşaması</span></div><div class="relay-grid"><article class="panel"><div class="big-icon">⤳</div><h2>Aktarım izni</h2><p>Relay varsayılan olarak kapalı kalır. Gerçek radyo aktarımı, pil politikası ve kalıcı şifreli kuyruk native katmana bağlanmalıdır.</p><label class="toggle-row"><span><b>Bu cihazın relay olmasına izin ver</b><small>Web anahtarı yalnızca tercih kaydeder; radyo aktarımını etkinleştirmez.</small></span><input id="relay-toggle" type="checkbox"></label><p id="relay-feedback" class="feedback" role="status"></p></article><article class="panel"><h2>Akıllı uyku profili</h2><div class="policy-row"><span>Ön planda</span><b>5 sn önerilen tarama aralığı</b></div><div class="policy-row"><span>Boşta</span><b>45 sn önerilen aralık</b></div><div class="policy-row"><span>Düşük pil / uyku</span><b>300 sn veya OS ertelemesi</b></div><p class="muted">Bunlar çekirdek politika hedefleridir; Android ve iOS işletim sistemi arka plan işlerini kısıtlayabilir veya durdurabilir.</p></article></div></section>
+      <section id="view-settings" class="view" hidden><div class="section-intro"><div><h2>Güvenlik ve ayarlar</h2><p>Bu cihazdaki PWA verileri ve platform sınırlamaları.</p></div></div><div class="panel form-panel"><h2>Yerel veri</h2><p>Kişi etiketleri ve taslaklar bu tarayıcının localStorage alanında saklanır. Burada gerçek mesajlaşma anahtarları tutulmaz.</p><div class="form-actions"><button id="export-data" class="button secondary">Yerel veriyi dışa aktar</button><button id="clear-data" class="button danger">Bu tarayıcı verilerini sil</button></div><p id="settings-feedback" class="feedback" role="status"></p><hr><h2>Platform gerçeği</h2><ul class="limits"><li>iOS Safari, genel Web Bluetooth erişimi sunan Chromium masaüstü/Android ile aynı yeteneklere sahip değildir.</li><li>Arka plan BLE ve reklam davranışı iOS/Android tarafından kısıtlanır; bu kısıtlamaları aşmaya çalışmak yerine OS destekli görevler kullanılmalıdır.</li><li>Web arayüzü tek başına güvenli radyo oturumu, ACK veya A→B→C aktarımı sağlayamaz.</li></ul></div></section>
+      <footer> NEXORA MESH <span>•</span> Yerel iletişim konsolu <span>•</span> Radyo köprüsü bağlı değil</footer>
+    </main>
+  </div>
+  <dialog id="contact-dialog"><form method="dialog" class="dialog-card"><button class="dialog-close" aria-label="Kapat">×</button><div class="eyebrow">QR TRUST</div><h2>Cihaz tanı</h2><p>QR payload'ını ayrı ve güvenilir bir kanaldan aldığından emin ol. Bu PWA kaydı gerçek kriptografik doğrulama değildir.</p><label for="quick-name">Cihaz adı</label><input id="quick-name" placeholder="Cihaz adı"><label for="quick-qr">QR içeriği</label><textarea id="quick-qr" rows="4" placeholder="NEXORAMESH:…"></textarea><button id="quick-save" class="button primary" type="button">Yerel listeye ekle</button><p id="dialog-feedback" class="feedback"></p></form></dialog>
+  <script src="./app.js" defer></script>
+</body>
+</html>
