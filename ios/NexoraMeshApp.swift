@@ -356,7 +356,11 @@ private struct ChatPrototypeView: View {
             .padding(.horizontal).padding(.top, 8)
             ScrollView {
                 VStack(alignment: .leading, spacing: 10) {
-                    ForEach(secureChat.messages) { message in
+                    ForEach(secureChat.messages.filter { message in
+                        guard let selected = secureChat.selectedRecipientFingerprint,
+                              let recipient = message.recipientFingerprint else { return false }
+                        return recipient.caseInsensitiveCompare(selected) == .orderedSame
+                    }) { message in
                         VStack(alignment: message.outgoing ? .trailing : .leading, spacing: 4) {
                             Text(message.text)
                                 .foregroundStyle(.white)
@@ -390,6 +394,9 @@ private struct ChatPrototypeView: View {
                 .disabled(secureChat.selectedRecipientFingerprint == nil || draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
             .padding()
+        }
+        .onAppear {
+            draft = secureChat.loadDraft(for: secureChat.selectedRecipientFingerprint)
         }
     }
 }
