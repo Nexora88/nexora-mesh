@@ -10,11 +10,13 @@ Android uygulamasına QR tarayıcı ve yerel güvenilir kişi kaydı eklendi. Ka
 
 ## Android çevrimdışı bağlantı prototipi
 
-İlk aktarım katmanı Bluetooth Classic RFCOMM kullanır. Kullanıcı cihaz aramasını kendisi başlatır; yakındaki cihaz otomatik olarak güvenilir sayılmaz. Kullanıcı cihazı seçmeli ve her iki telefonda da Android sistem eşleştirme isteğini onaylamalıdır. Eşleştirmeden sonra bir telefon gelen bağlantıyı bekler, diğeri bağlanır. İnternet kapalıyken doğrudan metin iletimi hedeflenmiştir.
+İlk radyo taşıması Bluetooth Classic RFCOMM ile iki Android cihaz arasında doğrudan bağlantı kurar. Kullanıcı cihaz aramasını başlatır ve Android sistem eşleştirmesini onaylar; bu eşleştirme tek başına uygulama kimliği değildir.
 
-İki fiziksel cihazla deneme adımları: [Android Bluetooth test rehberi](docs/ANDROID_BLUETOOTH_TEST.md). APK indirme ve sürüm yayımlama: [Android APK rehberi](docs/ANDROID_INSTALL.md).
+Güvenlik sekmesinde cihaz kimliği kalıcıdır: özel anahtar, Android Keystore tarafından korunan AES-GCM anahtarıyla şifrelenerek yerel depoda tutulur. Kişi QR kodu taranıp açıkça kaydedilir. Bağlantı, karşı tarafın HELLO mesajındaki açık anahtarın kaydedilmiş QR parmak iziyle eşleşmesi olmadan mesaj göndermez. Eşleşme sonrası doğrudan metin ve 1–64 MiB dosyalar ECDH/AES-GCM kanalı üzerinden gönderilir; dosyalar 16 KiB parçalara bölünür ve alıcıda SHA-256 ile doğrulanır.
 
-**Sınırlar:** Aynı anda tek doğrudan bağlantı vardır. Android sistem eşleştirmesi uygulama seviyesinde kimlik doğrulama değildir. Güvenlik sekmesi oturumluk QR açık anahtarını ve parmak izini gösterebilir; QR tarama/kontak kaydetme/doğrulama akışı henüz yoktur. ECDH/AES-GCM ve medya parçalama kodu mevcut Bluetooth taşımasına bağlanmamıştır. Kalıcı mesaj geçmişi, teslim raporları, Apple uyumluluğu ve gerçek radyo üzerinden mesh aktarma tamamlanmamıştır. CI derlemesi gerçek telefonlarda Bluetooth'un çalıştığını kanıtlamaz.
+Bu, bağımsız güvenlik denetimi yapılmış bir mesajlaşma sistemi değildir. CI derlemesi fiziksel cihazda radyo bağlantısını kanıtlamaz. Test adımları: [Android Bluetooth, E2EE ve medya test rehberi](docs/ANDROID_BLUETOOTH_TEST.md). APK indirme: [Android APK rehberi](docs/ANDROID_INSTALL.md).
+
+**Sınırlar:** Aynı anda tek doğrudan Bluetooth Classic bağlantısı vardır. A→B→C gerçek çok atlamalı aktarım henüz Android taşımasına bağlı değildir. Dosya aktarımında devam ettirme ve teslim onayı yoktur. iOS CoreBluetooth/Android BLE ortak taşıması ve iPhone–Android fiziksel testi tamamlanmamıştır. Sesli/görüntülü arama, kalıcı sohbet geçmişi ve bağımsız güvenlik incelemesi yoktur.
 
 ## Vizyon
 
@@ -30,24 +32,24 @@ Gizlilik varsayılan olmalı. Keşif kullanıcı tarafından başlatılır; yak�
 
 ## Mevcut durum
 
-- [x] Açık kaynak depo ve Rust çalışma alanı
-- [x] Android Jetpack Compose arayüzü
-- [x] Apple platformları için SwiftUI arayüz başlangıcı
-- [x] Rust çerçeveleme kodu ve testleri
-- [x] Android Bluetooth keşfi ve sistem eşleştirmesi kodlandı (gerçek cihaz testi bekliyor)
-- [x] Doğrudan RFCOMM metin aktarımı kodlandı (gerçek cihaz testi bekliyor)
-- [x] İki telefonla deneme rehberi
-- [x] Rust tarafında sınırlı, test edilebilir relay queue / hop-limit çekirdeği (Android transport bağlantısı yok)
-- [x] CI debug APK artefaktı ve etiket tabanlı GitHub Release iş akışı eklendi
-- [ ] Güncel CI derlemesinin ve relay testlerinin başarıyla tamamlanması
-- [ ] İnternet kapalıyken iki fiziksel Android cihaz arasında çift yönlü mesaj testi
-- [ ] QR tarama, karşılıklı anahtar doğrulama ve güvenilir kişi kaydetme akışı\n- [ ] ECDH/AES-GCM'i taşıma protokolüne bağlama ve anahtar doğrulamasını zorunlu kılma\n- [ ] Uygulama seviyesinde doğrulanmış uçtan uca şifreleme
-- [ ] Kalıcı sohbet geçmişi ve güvenilir teslim durumu
-- [ ] iOS Xcode projesi ve gerçek cihaz derlemesi
-- [ ] Android Bluetooth taşıyıcısına gerçek multi-hop aktarımının bağlanması ve üç cihaz testi
-- [ ] Medya parçalama/yeniden birleştirmeyi Bluetooth aktarımına ve dosya seçici arayüzüne bağlama\n- [ ] Ses ve görüntü için gerçek zamanlı çağrı/codec protokolü
+- [x] Android Jetpack Compose arayüzü ve doğrudan Bluetooth Classic RFCOMM taşıması
+- [x] Kalıcı cihaz kimliği; özel anahtar Android Keystore AES-GCM anahtarıyla korunur
+- [x] QR tarama, açıkça onaylanan güvenilir kişi kaydı ve parmak izi eşleşmesi olmadan mesaj gönderimini engelleme
+- [x] QR ile güvenilen kimlik eşleşmesinden sonra ECDH/AES-GCM şifreli metin protokolü
+- [x] 1–64 MiB dosyalar için şifreli parça aktarımı ve alıcıda SHA-256 bütünlük doğrulaması
+- [x] Rust tarafında sınırlı, test edilebilir relay queue / hop-limit çekirdeği
+- [x] CI debug APK artefaktı ve etiket tabanlı GitHub Release iş akışı
+- [x] CI'da Rust biçim/test/Clippy, Python codec testi ve Android debug derlemesi (mevcut commit için sonuç bekleniyor)
+- [ ] İki fiziksel Android cihazda güncel QR-gated E2EE ve dosya aktarımı testi
+- [ ] Birden fazla Bluetooth bağlantısı ve gerçek A→B→C store-and-forward
+- [ ] Üç fiziksel cihazda relay testleri (tekrar, süre aşımı, hop sınırı ve kuyruk doluluğu dahil)
+- [ ] Android BLE GATT taşıması ve iOS CoreBluetooth taşıması
+- [ ] Gerçek iPhone–Android bağlantı testi
+- [ ] Dosya aktarımında devam ettirme, teslim alındı onayı ve güvenli dosya paylaşımı
+- [ ] Ses/video çağrı protokolü, gerçek zamanlı codec ve cihaz testleri
+- [ ] Bağımsız güvenlik incelemesi
 
-Kaynak kodda bulunması, özelliğin test edilmiş çalışır durumda olduğu anlamına gelmez.
+Kaynak kodda bulunması, özelliğin fiziksel cihazlarda doğrulanmış çalışır durumda olduğu anlamına gelmez.
 
 ## Yapı
 
