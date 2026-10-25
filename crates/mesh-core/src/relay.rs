@@ -31,6 +31,7 @@ pub enum RelayDecision {
     DropExpired,
     DropHopLimit,
     DropOversized,
+    DropRelayDisabled,
 }
 
 impl Envelope {
@@ -67,6 +68,7 @@ pub struct RelayQueue {
     seen: HashSet<[u8; 16]>,
     seen_order: VecDeque<[u8; 16]>,
     seen_capacity: usize,
+    relay_enabled: bool,
 }
 
 impl Default for RelayQueue {
@@ -83,7 +85,20 @@ impl RelayQueue {
             seen: HashSet::new(),
             seen_order: VecDeque::new(),
             seen_capacity: seen_capacity.max(1),
+            // Forwarding is privacy-sensitive and must be explicitly opted into.
+            relay_enabled: false,
         }
+    }
+
+    pub fn set_relay_enabled(&mut self, enabled: bool) {
+        self.relay_enabled = enabled;
+        if !enabled {
+            self.queue.clear();
+        }
+    }
+
+    pub fn relay_enabled(&self) -> bool {
+        self.relay_enabled
     }
 
     pub fn len(&self) -> usize {
@@ -96,6 +111,9 @@ impl RelayQueue {
 
     /// Accept only a fresh, valid envelope. The caller must supply trusted local time.
     pub fn enqueue(&mut self, envelope: Envelope, now_unix: u64) -> RelayDecision {
+        if !self.relay_enabled {
+            return RelayDecision::DropRelayDisabled;
+        }
         let validation = envelope.validate(now_unix);
         if validation != RelayDecision::Forward {
             return validation;
@@ -147,6 +165,18 @@ mod tests {
     }
 
     #[test]
+    fn relay_is_disabled_by_default_and_can_be_opted_in() {
+        let mut queue = RelayQueue::new(4, 8);
+        assert!(!queue.relay_enabled());
+        assert_eq!(queue.enqueue(envelope(1, 3, 100), 1), RelayDecision::DropRelayDisabled);
+        queue.set_relay_enabled(true);
+        assert!(queue.relay_enabled());
+        assert_eq!(queue.enqueue(envelope(1, 3, 100), 1), RelayDecision::Forward);
+        queue.set_relay_enabled(false);
+        assert!(queue.is_empty());
+    }
+
+    #[test]
     fn forwarding_decrements_hops_without_changing_ciphertext() {
         let original = envelope(1, 3, 100);
         let forwarded = original.forwarded(10).unwrap();
@@ -167,6 +197,7 @@ mod tests {
     #[test]
     fn duplicate_message_ids_are_not_queued_twice() {
         let mut queue = RelayQueue::new(4, 8);
+        queue.set_relay_enabled(true);
         assert_eq!(
             queue.enqueue(envelope(1, 3, 100), 1),
             RelayDecision::Forward
@@ -181,6 +212,7 @@ mod tests {
     #[test]
     fn queue_capacity_is_bounded() {
         let mut queue = RelayQueue::new(1, 8);
+        queue.set_relay_enabled(true);
         assert_eq!(
             queue.enqueue(envelope(1, 3, 100), 1),
             RelayDecision::Forward
@@ -194,6 +226,7 @@ mod tests {
     #[test]
     fn expired_items_are_discarded_when_popped() {
         let mut queue = RelayQueue::new(4, 8);
+        queue.set_relay_enabled(true);
         queue.enqueue(envelope(1, 3, 5), 1);
         queue.enqueue(envelope(2, 3, 50), 1);
         assert_eq!(queue.pop_next(10).unwrap().message_id, [2; 16]);
@@ -203,6 +236,7 @@ mod tests {
     fn three_node_store_and_forward_simulation_preserves_opaque_payload() {
         let sent = envelope(77, 3, 100);
         let mut relay_b = RelayQueue::new(4, 8);
+        relay_b.set_relay_enabled(true);
         assert_eq!(relay_b.enqueue(sent.clone(), 10), RelayDecision::Forward);
 
         // B stores the opaque envelope, then spends exactly one hop when forwarding.
@@ -213,6 +247,7 @@ mod tests {
         assert_eq!(forwarded_by_b.destination_token, sent.destination_token);
 
         let mut destination_c = RelayQueue::new(4, 8);
+        destination_c.set_relay_enabled(true);
         assert_eq!(
             destination_c.enqueue(forwarded_by_b, 10),
             RelayDecision::Forward
