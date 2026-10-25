@@ -54,7 +54,7 @@ class BleGattTransport(context: Context) {
     private val pendingWrites = ArrayDeque<ByteArray>()
     private val lock = Any()
 
-    private data class Assembly(val count: Int, val chunks: MutableMap<Int, ByteArray> = mutableMapOf(), var bytes: Int = 0)
+    private data class Assembly(val count: Int, val createdAtMs: Long = android.os.SystemClock.elapsedRealtime(), val chunks: MutableMap<Int, ByteArray> = mutableMapOf(), var bytes: Int = 0)
 
     fun setListener(value: Listener?) { listener = value }
 
@@ -223,6 +223,8 @@ class BleGattTransport(context: Context) {
     }
 
     private fun acceptFragment(frame: ByteArray): Boolean {
+        val now = android.os.SystemClock.elapsedRealtime()
+        assemblies.entries.removeIf { now - it.value.createdAtMs > ASSEMBLY_TIMEOUT_MS }
         if (frame.size < HEADER_BYTES) return false
         val buffer = ByteBuffer.wrap(frame).order(ByteOrder.BIG_ENDIAN)
         val idBytes = ByteArray(16); buffer.get(idBytes)
@@ -265,5 +267,6 @@ class BleGattTransport(context: Context) {
         private const val HEADER_BYTES = 22
         private const val MAX_ENVELOPE = 256 * 1024
         private const val MAX_INCOMPLETE = 4
+        private const val ASSEMBLY_TIMEOUT_MS = 30_000L
     }
 }
