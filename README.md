@@ -25,6 +25,10 @@ Privacy should be the default. Devices should be undiscoverable when possible un
 - [x] Product vision, threat model, and roadmap
 - [x] Rust RelayQueue (bounded, dedup, TTL/hops, snapshot/restore) + in-memory A→B→C simulation tests
 - [x] Smart power-aware scan interval policy (battery, charging, low-power, foreground signals)
+- [x] Android BatteryManager bridge + BLE permissions skeleton
+- [x] iOS CoreBluetooth manager + background-mode notes
+- [x] Desktop Tauri/BLE skeleton notes
+- [x] Python multi-node simulation demo
 - [ ] Android CI build and physical-device installation verified
 - [ ] Xcode project and physical iOS build
 - [ ] Bluetooth discovery and trusted pairing
@@ -38,15 +42,13 @@ Do not describe unfinished items as implemented.
 
 ## Repository layout
 
-- android/ — Android app shell
-- ios/ — SwiftUI interface starter and Apple platform notes
-- crates/mesh-core/ — Rust protocol core (framing + relay queue + power policy)
-- docs/PRODUCT_VISION.md — product vision and privacy rules
-- docs/PROTOCOL.md — protocol notes
-- docs/THREAT_MODEL.md — security boundaries and risks
-- docs/ROADMAP.md — development milestones
-- docs/STORE_FORWARD_POWER_DESKTOP.md — store-and-forward, power policy and desktop notes
-- tools/ — Python reference utilities and tests
+- android/ — Android app shell + MeshCoreBridge
+- ios/ — SwiftUI interface + MeshRadioManager + Info.plist notes
+- crates/mesh-core/ — Rust protocol core (framing + relay queue + power policy + C ABI)
+- desktop/ — Tauri desktop skeleton notes
+- docs/ — vision, protocol, threat model, roadmap, host integration
+- tools/ — Python reference utilities and multi-node sim
+- web/ — installable management PWA (no radio)
 
 ## Range limitations
 
@@ -62,4 +64,4 @@ Bluetooth and Wi-Fi Direct do not provide unlimited range. Hardware, terrain, ob
 6. Do not claim emergency readiness before real field testing.
 7. Keep internet permission out of the Android manifest unless a documented requirement justifies it.
 
-See docs/PRODUCT_VISION.md, docs/PROTOCOL.md, docs/THREAT_MODEL.md, docs/STORE_FORWARD_POWER_DESKTOP.md and SECURITY.md.
+See docs/PRODUCT_VISION.md, docs/PROTOCOL.md, docs/THREAT_MODEL.md, docs/STORE_FORWARD_POWER_DESKTOP.md, docs/HOST_INTEGRATION.md and SECURITY.md.
