@@ -31,6 +31,7 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: "8.9"
+      - run: gradle -p android testDebugUnitTest
       - run: gradle -p android assembleDebug
       - name: Upload installable debug APK
         uses: actions/upload-artifact@v4
