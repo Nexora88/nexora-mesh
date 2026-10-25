@@ -1,5 +1,6 @@
 import CoreBluetooth
 import Foundation
+import Combine
 
 /// Cross-platform BLE GATT transport for complete, bounded Nexora Mesh wire envelopes.
 /// It moves bytes only; callers must authenticate peers and encrypt payloads before sending.
@@ -19,6 +20,7 @@ final class MeshBLETransport: NSObject, ObservableObject {
     private var peripheralManager: CBPeripheralManager!
     private var characteristic: CBMutableCharacteristic?
     private var connectedPeripheral: CBPeripheral?
+    private var peripherals: [UUID: CBPeripheral] = [:]
     private var remoteCharacteristic: CBCharacteristic?
     private var subscribedCentrals: [CBCentral] = []
     private var assemblies: [String: Assembly] = [:]
@@ -55,7 +57,7 @@ final class MeshBLETransport: NSObject, ObservableObject {
     }
 
     func connect(to id: UUID) {
-        guard let peer = central.retrievePeripherals(withIdentifiers: [id]).first else {
+        guard let peer = peripherals[id] ?? central.retrievePeripherals(withIdentifiers: [id]).first else {
             status = "Cihaz artık bulunamıyor; yeniden ara."
             return
         }
@@ -86,7 +88,7 @@ final class MeshBLETransport: NSObject, ObservableObject {
         let maxPayload = max(1, peer.maximumWriteValueLength(for: .withResponse) - Self.headerBytes)
         let transferID = Data((0..<16).map { _ in UInt8.random(in: 0...255) })
         let count = Int(ceil(Double(envelope.count) / Double(maxPayload)))
-        guard count <= UInt16.max else { status = "Paket çok fazla parçaya bölünüyor."; return }
+        guard count <= Int(UInt16.max) else { status = "Paket çok fazla parçaya bölünüyor."; return }
         var fragments = [Data]()
         for index in 0..<count {
             let start = index * maxPayload
@@ -174,6 +176,7 @@ extension MeshBLETransport: CBCentralManagerDelegate {
 
     func centralManager(_ central: CBCentralManager, didDiscover peripheral: CBPeripheral,
                         advertisementData: [String: Any], rssi RSSI: NSNumber) {
+        peripherals[peripheral.identifier] = peripheral
         discoveredNames[peripheral.identifier] = peripheral.name ?? "Yakındaki Nexora cihazı"
     }
 
