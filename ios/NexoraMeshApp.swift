@@ -39,6 +39,7 @@ private struct ChatItem: Identifiable {
 }
 
 struct MeshRootView: View {
+    @StateObject private var bleTransport = MeshBLETransport()
     @State private var selectedTab: MeshTab = .chats
     @State private var selectedChat: ChatItem?
 
@@ -136,9 +137,39 @@ struct MeshRootView: View {
     private var devicesView: some View {
         VStack(alignment: .leading, spacing: 16) {
             Text("Cihazlar").font(.largeTitle.bold()).foregroundStyle(.white)
-            infoCard("Varsayılan olarak gizli", "Bir cihazın kimliği ve adı, yalnızca keşfe izin verdiğinde yakındaki eşleştirme akışında sunulmalı. Mesaj ve kişi listeleri herkese açık olmamalı.", symbol: "lock.shield")
-            infoCard("Açık onayla tanımla", "Yeni cihaz, kullanıcı iki cihazda da doğrulama yapıp eşleştirmeyi onaylamadan güvenilir kişi sayılmamalı.", symbol: "checkmark.seal")
-            infoCard("Radyo bağlantısı henüz yok", "Bu iOS kabuğu şu an arayüz prototipidir; Bluetooth keşfi, bağlantı ve mesaj aktarımı uygulanmış değildir.", symbol: "antenna.radiowaves.left.and.right")
+            infoCard("BLE GATT taşıması", "Bu ekran ortak BLE GATT servisinde cihaz keşfi ve bağlantı prototipini kullanır. Bağlantı tek başına kişi kimliği veya uçtan uca şifreleme doğrulaması değildir.", symbol: "antenna.radiowaves.left.and.right")
+            Button("Yakındaki BLE cihazlarını tara") { bleTransport.startDiscovery() }
+                .buttonStyle(.borderedProminent)
+                .tint(MeshPalette.green)
+                .foregroundStyle(MeshPalette.background)
+            Text(bleTransport.status)
+                .font(.caption)
+                .foregroundStyle(MeshPalette.muted)
+            ForEach(Array(bleTransport.discoveredNames.keys), id: \.self) { id in
+                Button {
+                    bleTransport.connect(to: id)
+                } label: {
+                    HStack {
+                        Image(systemName: "dot.radiowaves.left.and.right")
+                            .foregroundStyle(MeshPalette.green)
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(bleTransport.discoveredNames[id] ?? "Nexora Mesh cihazı")
+                                .foregroundStyle(.white)
+                            Text(id.uuidString)
+                                .font(.caption2)
+                                .foregroundStyle(MeshPalette.muted)
+                        }
+                        Spacer()
+                        Text("BAĞLAN")
+                            .font(.caption2.bold())
+                            .foregroundStyle(MeshPalette.green)
+                    }
+                    .padding(12)
+                    .background(MeshPalette.surface, in: RoundedRectangle(cornerRadius: 14))
+                }
+                .buttonStyle(.plain)
+            }
+            infoCard("Mesajlaşma güvenliği", "Bu GATT katmanı taşıma prototipidir. Bu ekran henüz sohbet mesajlarını Rust zarfına bağlamaz; QR doğrulaması ve uygulama katmanı şifreleme zorunlu olmadan özel mesaj gönderimi yapılmamalıdır.", symbol: "lock.shield")
             Spacer()
         }
         .padding(.horizontal, 18)
