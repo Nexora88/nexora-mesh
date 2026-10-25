@@ -331,8 +331,7 @@ final class MeshSecureChat: ObservableObject {
                 if let error { throw error.takeRetainedValue() }
                 throw NSError(domain: "NexoraMesh.KeyStore", code: 2)
             }
-            let kdfKey = SymmetricKey(data: Data("NexoraMesh/session-key/v1".utf8))
-            let key = SymmetricKey(data: Data(HMAC<SHA256>.authenticationCode(for: shared, using: kdfKey)))
+            let key = Self.deriveSessionKey(sharedSecret: shared)
             candidateKey = key
             sessionKey = nil
             isSecure = false
@@ -456,17 +455,23 @@ final class MeshSecureChat: ObservableObject {
     }
 
 
-    private static func fingerprint(_ key: Data) -> String {
+    /// Experimental v1 compatibility KDF. This is not a reviewed Noise/HKDF protocol.
+    static func deriveSessionKey(sharedSecret: Data) -> SymmetricKey {
+        let kdfKey = SymmetricKey(data: Data("NexoraMesh/session-key/v1".utf8))
+        return SymmetricKey(data: Data(HMAC<SHA256>.authenticationCode(for: sharedSecret, using: kdfKey)))
+    }
+
+    static func fingerprint(_ key: Data) -> String {
         SHA256.hash(data: key).prefix(20).map { String(format: "%02X", $0) }.joined(separator: ":")
     }
 
-    private static func seal(_ plaintext: Data, key: SymmetricKey, aad: Data) throws -> (nonce: Data, ciphertext: Data) {
+    static func seal(_ plaintext: Data, key: SymmetricKey, aad: Data) throws -> (nonce: Data, ciphertext: Data) {
         let nonce = AES.GCM.Nonce()
         let sealed = try AES.GCM.seal(plaintext, using: key, nonce: nonce, authenticating: aad)
         return (Data(nonce), sealed.ciphertext + sealed.tag)
     }
 
-    private static func open(_ frame: [String: Any], key: SymmetricKey, aad: Data) throws -> Data {
+    static func open(_ frame: [String: Any], key: SymmetricKey, aad: Data) throws -> Data {
         guard let n = frame["n"] as? String, let c = frame["c"] as? String,
               let nonce = Data(base64Encoded: n), let ciphertext = Data(base64Encoded: c) else {
             throw MeshSecureChatError.invalidFrame
@@ -474,7 +479,7 @@ final class MeshSecureChat: ObservableObject {
         return try open(nonce: nonce, ciphertext: ciphertext, key: key, aad: aad)
     }
 
-    private static func open(nonce: Data, ciphertext: Data, key: SymmetricKey, aad: Data) throws -> Data {
+    static func open(nonce: Data, ciphertext: Data, key: SymmetricKey, aad: Data) throws -> Data {
         guard nonce.count == 12, ciphertext.count >= 16 else { throw MeshSecureChatError.invalidFrame }
         let box = try AES.GCM.SealedBox(nonce: AES.GCM.Nonce(data: nonce),
                                         ciphertext: ciphertext.dropLast(16), tag: ciphertext.suffix(16))
