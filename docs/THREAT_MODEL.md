@@ -27,16 +27,16 @@
 ## Known security limitations
 
 - ECDH currently uses persistent identity keys for session derivation. **Forward secrecy is not provided**: compromise of a long-term private key could expose recorded sessions.
-- Text messages do not yet have a persistent replay/deduplication ID or a delivery acknowledgement protocol. AES-GCM detects modification, but an authenticated old frame could be replayed within the same accepted session.
+- The Android prototype now uses persistent message IDs, a bounded replay window, encrypted delivery ACKs and a bounded retry loop. These are best-effort delivery semantics, not exactly-once delivery; process termination, persistence failures, concurrent sessions and retry timing still require testing.
 - There is no key rotation, multi-device session management, persistent message history, or resumable media transfer.
 - The Rust relay queue is not connected to the Bluetooth transport. The A→B→C Rust test is an in-memory simulation, not a radio test.
-- iOS has no interoperable BLE GATT transport yet; current Android RFCOMM cannot be assumed to connect to an iPhone app.
+- iOS BLE GATT and a Swift secure-chat prototype now exist, including recipient-bound Keychain drafts and an Android-compatible v1 protocol attempt. Simulator compilation and reference vectors do not prove native crypto agreement or radio interoperability; QR camera scanning and physical-device verification remain outstanding.
 - Bluetooth metadata, device identifiers, timing, file sizes, and radio presence may remain observable.
 
 ## Planned mitigations
 
 - Add ephemeral ECDH with identity-key signatures to provide forward secrecy.
-- Add authenticated message IDs, replay protection, expiry, acknowledgements, and bounded persistent relay queues.
+- Extend automated fault-injection coverage for ACK loss, process restart, duplicate frames, full queues, malformed packets and disconnect/reconnect; verify native Swift and Android cryptographic vectors against the same fixtures.
 - Add a shared BLE GATT framing/transport on Android and iOS and test it on physical devices.
 - Keep relay nodes limited to opaque ciphertext and explicit user opt-in.
 - Use a reviewed cryptographic protocol/library and arrange independent security review before presenting this as a secure messenger.
