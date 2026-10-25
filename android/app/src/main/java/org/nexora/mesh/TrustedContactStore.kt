@@ -27,8 +27,11 @@ class TrustedContactStore(context: Context) {
 
     @Synchronized
     fun save(contact: ContactQr.Contact): Entry {
-        val current = all().filterNot { it.fingerprint == contact.fingerprint }.toMutableList()
-        val entry = Entry(contact.label, contact.publicKeyBase64, contact.fingerprint, System.currentTimeMillis())
+        // Re-parse the payload so only a key whose claimed fingerprint matches its bytes is stored.
+        val validated = ContactQr.decode(ContactQr.encode(contact.publicKeyBase64, contact.label))
+        require(validated.fingerprint.equals(contact.fingerprint, ignoreCase = true)) { "Contact fingerprint mismatch" }
+        val current = all().filterNot { it.fingerprint.equals(validated.fingerprint, ignoreCase = true) }.toMutableList()
+        val entry = Entry(validated.label, validated.publicKeyBase64, validated.fingerprint, System.currentTimeMillis())
         current.add(entry)
         val array = JSONArray()
         current.forEach { item ->
