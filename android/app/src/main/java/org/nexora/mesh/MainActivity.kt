@@ -26,6 +26,11 @@ import androidx.compose.runtime.snapshots.SnapshotStateList
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.foundation.Image
+import android.graphics.Bitmap
+import com.google.zxing.BarcodeFormat
+import com.google.zxing.MultiFormatWriter
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -229,15 +234,28 @@ private fun DevicesScreen(
 
 @Composable
 private fun SecurityScreen(connectionName: String?) {
+    val identity = remember { SecureChannel.newIdentityKeyPair() }
+    val qrBitmap = remember(identity) {
+        val payload = ContactQr.encode(identity.publicKeyBase64)
+        val matrix = MultiFormatWriter().encode(payload, BarcodeFormat.QR_CODE, 640, 640)
+        Bitmap.createBitmap(640, 640, Bitmap.Config.ARGB_8888).also { bitmap ->
+            for (x in 0 until 640) for (y in 0 until 640) {
+                bitmap.setPixel(x, y, if (matrix[x, y]) android.graphics.Color.BLACK else android.graphics.Color.WHITE)
+            }
+        }
+    }
     Column(Modifier.fillMaxSize().padding(22.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
         Text("Güvenlik ve kimlik", color = Color.White, fontSize = 27.sp, fontWeight = FontWeight.Bold)
-        InfoCard("Cihaz kimliği", "İlk sürüm Android Bluetooth sistem eşleştirmesine dayanır. Cihaz adı tek başına kimlik kanıtı değildir; yalnızca tanıdığın cihazlarla eşleştir.")
+        InfoCard("Kişi ekleme QR'sı", "Bu QR, bu oturum için üretilen açık anahtar kimliğini taşır. Diğer cihazın tarayıp parmak izini doğrulaması gerekir; henüz tarayıcı/kayıt akışı bağlı değil.")
+        Image(bitmap = qrBitmap.asImageBitmap(), contentDescription = "Nexora Mesh açık anahtar QR kodu", modifier = Modifier.size(220.dp).align(Alignment.CenterHorizontally))
+        Text("Parmak izi", color = MeshGreen, fontWeight = FontWeight.Bold)
+        Text(identity.fingerprint, color = Color.White, fontSize = 11.sp)
         InfoCard("Bağlantı durumu", connectionName ?: "Şu anda bağlı cihaz yok.")
-        InfoCard("Henüz tamamlanmayanlar", "Uygulama seviyesinde doğrulama kodu/QR, uçtan uca şifreleme, kalıcı sohbet geçmişi, Apple uyumluluğu ve ara cihazlarla mesh aktarımı henüz uygulanmadı.")
-        InfoCard("Acil durum uyarısı", "Bu sürüm deneysel prototiptir; afet veya acil durumlarda güvenilir bir iletişim aracı olarak kullanma. Gerçek cihaz testleri ve güvenlik incelemesi gerekiyor.")
+        InfoCard("Şifreleme durumu", "ECDH ve AES-GCM yapı taşları eklendi; mevcut Bluetooth mesaj akışına henüz bağlanmadı. QR doğrulaması yapılmadan bu kanalı güvenli kabul etme.")
+        InfoCard("Platform ve aktarım", "Çok atlamalı yönlendirme, medya protokolünün Bluetooth'a bağlanması ve Apple–Android yerel taşıması hâlâ geliştirme gerektiriyor.")
+        InfoCard("Acil durum uyarısı", "Deneysel prototiptir; afet veya acil durumlarda güvenilir bir iletişim aracı olarak kullanma. Gerçek cihaz testleri ve bağımsız güvenlik incelemesi gerekiyor.")
     }
 }
-
 @Composable
 private fun InfoCard(title: String, body: String) {
     Column(Modifier.fillMaxWidth().background(MeshSurface, RoundedCornerShape(18.dp)).padding(18.dp), verticalArrangement = Arrangement.spacedBy(7.dp)) {
