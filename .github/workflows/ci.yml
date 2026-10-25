@@ -55,6 +55,7 @@ jobs:
         with:
           python-version: "3.12"
       - run: python tools/tests/test_codec_vectors.py
+      - run: python tools/tests/test_crypto_vectors.py
 
   ios-native:
     runs-on: macos-latest
