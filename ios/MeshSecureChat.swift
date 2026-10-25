@@ -235,7 +235,7 @@ final class MeshSecureChat: ObservableObject {
                 let plaintext = try Self.open(nonce: nonce, ciphertext: ciphertext, key: key,
                                               aad: Data("NexoraMesh/data/v1:\(id)".utf8))
                 var received = defaults.stringArray(forKey: receivedKey) ?? []
-                let isNew = !received.contains(id)
+                let isNew = Self.acceptMessageID(id, seen: received)
                 if isNew {
                     received.append(id)
                     if received.count > 4096 { received.removeFirst(received.count - 4096) }
@@ -454,6 +454,10 @@ final class MeshSecureChat: ObservableObject {
         defaults.set(try JSONEncoder().encode(pending), forKey: pendingKey)
     }
 
+
+    static func acceptMessageID(_ id: String, seen: [String]) -> Bool {
+        UUID(uuidString: id) != nil && !seen.contains(id)
+    }
 
     /// Experimental v1 compatibility KDF. This is not a reviewed Noise/HKDF protocol.
     static func deriveSessionKey(sharedSecret: Data) -> SymmetricKey {
