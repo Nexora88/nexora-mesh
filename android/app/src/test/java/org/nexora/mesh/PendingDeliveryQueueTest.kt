@@ -58,3 +58,40 @@ class PendingDeliveryQueueTest {
         assertEquals("encrypted-frame", restarted.get("id-1"))
     }
 }
+
+    @Test fun duplicateAckCannotRemoveAnyOtherPendingFrame() {
+        val queue = PendingDeliveryQueue(persist = { true })
+        assertTrue(queue.enqueue("id-1", "frame-1"))
+        assertTrue(queue.enqueue("id-2", "frame-2"))
+
+        assertTrue(queue.acknowledge("id-1"))
+        assertFalse(queue.acknowledge("id-1"))
+
+        assertEquals(mapOf("id-2" to "frame-2"), queue.snapshot())
+    }
+
+    @Test fun blankIdsAndFramesAreRejected() {
+        val queue = PendingDeliveryQueue(persist = { true })
+
+        assertFalse(queue.enqueue("", "frame"))
+        assertFalse(queue.enqueue("id", "  "))
+        assertEquals(0, queue.size())
+    }
+
+    @Test fun failedAckPersistenceDoesNotLoseTheMessage() {
+        var allowPersist = true
+        val durable = linkedMapOf("id-1" to "frame-1")
+        val queue = PendingDeliveryQueue(initial = durable, persist = { snapshot ->
+            if (!allowPersist) false else {
+                durable.clear()
+                durable.putAll(snapshot)
+                true
+            }
+        })
+        allowPersist = false
+
+        assertFalse(queue.acknowledge("id-1"))
+
+        assertEquals(mapOf("id-1" to "frame-1"), queue.snapshot())
+        assertEquals(mapOf("id-1" to "frame-1"), durable)
+    }
