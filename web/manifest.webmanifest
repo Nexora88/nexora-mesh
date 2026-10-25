@@ -1,0 +1,15 @@
+{
+  "id": "./",
+  "name": "Nexora Mesh — Yerel İletişim",
+  "short_name": "Nexora Mesh",
+  "description": "Çevrimdışı mesajlaşma için cihaz ve bağlantı yönetim konsolu",
+  "lang": "tr-TR",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#07110f",
+  "theme_color": "#07110f",
+  "icons": [
+    {"src":"./icon.svg","sizes":"any","type":"image/svg+xml","purpose":"any maskable"}
+  ]
+}
