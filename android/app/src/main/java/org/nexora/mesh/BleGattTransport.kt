@@ -210,9 +210,6 @@ class BleGattTransport(context: Context) {
             else status("BLE GATT servisi eklenemedi: $statusCode")
         }
         override fun onConnectionStateChange(device: BluetoothDevice, statusCode: Int, newState: Int) {
-        override fun onMtuChanged(device: BluetoothDevice, mtuSize: Int) {
-            if (mtuSize >= 23) serverMtu = mtuSize
-        }
             if (newState == BluetoothProfile.STATE_CONNECTED) {
                 serverPeer = device
                 serverPeerReady = false
@@ -226,6 +223,9 @@ class BleGattTransport(context: Context) {
                 listener?.onDisconnected()
                 status("BLE istemcisi ayrıldı.")
             }
+        }
+        override fun onMtuChanged(device: BluetoothDevice, mtuSize: Int) {
+            if (mtuSize >= 23) serverMtu = mtuSize
         }
         override fun onDescriptorWriteRequest(device: BluetoothDevice, requestId: Int,
             descriptor: BluetoothGattDescriptor, preparedWrite: Boolean, responseNeeded: Boolean,
