@@ -1,4 +1,5 @@
 import CryptoKit
+import Combine
 import Foundation
 import Security
 
@@ -220,7 +221,7 @@ final class MeshSecureChat: ObservableObject {
         ]
         var item: CFTypeRef?
         let status = SecItemCopyMatching(query as CFDictionary, &item)
-        if status == errSecSuccess, let key = item as! SecKey? { return key }
+        if status == errSecSuccess, let key = item as? SecKey { return key }
         guard status == errSecItemNotFound else { throw MeshSecureChatError.keyStore }
         let attributes: [String: Any] = [
             kSecAttrKeyType as String: kSecAttrKeyTypeECSECPrimeRandom,
@@ -232,7 +233,7 @@ final class MeshSecureChat: ObservableObject {
         ]
         var error: Unmanaged<CFError>?
         guard let key = SecKeyCreateRandomKey(attributes as CFDictionary, &error) else {
-            throw error?.takeRetainedValue() ?? MeshSecureChatError.keyStore as CFError
+            throw error?.takeRetainedValue() ?? (NSError(domain: "NexoraMesh.KeyStore", code: Int(status)) as CFError)
         }
         return key
     }
@@ -258,7 +259,7 @@ final class MeshSecureChat: ObservableObject {
                                                 0x06,0x08,0x2A,0x86,0x48,0xCE,0x3D,0x03,0x01,0x07,0x03,0x42,0x00]) else {
             throw MeshSecureChatError.invalidContact
         }
-        let raw = der.suffix(65) as CFData
+        let raw = Data(der.suffix(65)) as CFData
         let attributes: [String: Any] = [
             kSecAttrKeyType as String: kSecAttrKeyTypeECSECPrimeRandom,
             kSecAttrKeyClass as String: kSecAttrKeyClassPublic,
@@ -266,7 +267,7 @@ final class MeshSecureChat: ObservableObject {
         ]
         var error: Unmanaged<CFError>?
         guard let key = SecKeyCreateWithData(raw, attributes as CFDictionary, &error) else {
-            throw error?.takeRetainedValue() ?? MeshSecureChatError.invalidContact as CFError
+            throw error?.takeRetainedValue() ?? (NSError(domain: "NexoraMesh.Contact", code: 1) as CFError)
         }
         return key
     }
