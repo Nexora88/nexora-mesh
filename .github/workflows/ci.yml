@@ -65,6 +65,16 @@ jobs:
           targets: aarch64-apple-ios,aarch64-apple-ios-sim,x86_64-apple-ios
       - name: Build Rust XCFramework
         run: bash scripts/build-ios-xcframework.sh
+      - name: Type-check iOS Swift sources against simulator SDK
+        shell: bash
+        run: |
+          SIM_HEADERS="$(find dist/ios/MeshCore.xcframework -path '*/Headers/module.modulemap' -print -quit | xargs dirname)"
+          test -n "$SIM_HEADERS"
+          swiftc -typecheck \
+            -sdk "$(xcrun --sdk iphonesimulator --show-sdk-path)" \
+            -target arm64-apple-ios-simulator \
+            -I "$SIM_HEADERS" \
+            ios/MeshCoreBridge.swift ios/MeshBLETransport.swift ios/NexoraMeshApp.swift
       - name: Upload iOS Rust XCFramework
         uses: actions/upload-artifact@v4
         with:
