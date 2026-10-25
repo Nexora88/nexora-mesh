@@ -213,11 +213,13 @@ mod tests {
         assert_eq!(forwarded_by_b.destination_token, sent.destination_token);
 
         let mut destination_c = RelayQueue::new(4, 8);
-        assert_eq!(destination_c.enqueue(forwarded_by_b, 10), RelayDecision::Forward);
+        assert_eq!(
+            destination_c.enqueue(forwarded_by_b, 10),
+            RelayDecision::Forward
+        );
         let delivered_to_c = destination_c.pop_next(10).unwrap();
         assert_eq!(delivered_to_c.message_id, sent.message_id);
         assert_eq!(delivered_to_c.ciphertext, sent.ciphertext);
         assert_eq!(delivered_to_c.hops_remaining, 2);
     }
-
 }
