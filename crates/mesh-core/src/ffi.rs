@@ -98,10 +98,19 @@ mod tests {
             ciphertext: b"opaque-ciphertext".to_vec(),
         };
         let encoded = encode_envelope(&envelope).unwrap();
-        assert_eq!(unsafe { nm_wire_validate(encoded.as_ptr(), encoded.len()) }, 0);
+        assert_eq!(
+            unsafe { nm_wire_validate(encoded.as_ptr(), encoded.len()) },
+            0
+        );
         let mut output = vec![0u8; encoded.len()];
         let written = unsafe {
-            nm_wire_forward(encoded.as_ptr(), encoded.len(), output.as_mut_ptr(), output.len(), 10)
+            nm_wire_forward(
+                encoded.as_ptr(),
+                encoded.len(),
+                output.as_mut_ptr(),
+                output.len(),
+                10,
+            )
         };
         assert_eq!(written, encoded.len() as isize);
         let forwarded = decode_envelope(&output).unwrap();
@@ -121,7 +130,15 @@ mod tests {
         let encoded = encode_envelope(&envelope).unwrap();
         let mut output = vec![0u8; encoded.len()];
         assert_eq!(
-            unsafe { nm_wire_forward(encoded.as_ptr(), encoded.len(), output.as_mut_ptr(), output.len(), 5) },
+            unsafe {
+                nm_wire_forward(
+                    encoded.as_ptr(),
+                    encoded.len(),
+                    output.as_mut_ptr(),
+                    output.len(),
+                    5,
+                )
+            },
             -9
         );
     }
