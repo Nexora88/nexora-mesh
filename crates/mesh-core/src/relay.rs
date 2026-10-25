@@ -157,10 +157,7 @@ mod tests {
 
     #[test]
     fn expired_and_zero_hop_messages_are_rejected() {
-        assert_eq!(
-            envelope(1, 2, 10).validate(10),
-            RelayDecision::DropExpired
-        );
+        assert_eq!(envelope(1, 2, 10).validate(10), RelayDecision::DropExpired);
         assert_eq!(
             envelope(2, 0, 100).validate(10),
             RelayDecision::DropHopLimit
