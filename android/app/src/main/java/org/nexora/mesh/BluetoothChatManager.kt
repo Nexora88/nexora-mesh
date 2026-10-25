@@ -15,6 +15,11 @@ import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
+import android.os.Environment
+import java.io.File
+import java.io.FileOutputStream
+import java.util.UUID
+import java.util.concurrent.ConcurrentHashMap
 import android.util.Base64
 import org.json.JSONObject
 import java.security.MessageDigest
@@ -44,6 +49,7 @@ class BluetoothChatManager(context: Context) {
         fun onStatus(status: String)
         fun onPeerIdentityPending(contact: ContactQr.Contact) {}
         fun onSecurityChanged(verified: Boolean, fingerprint: String?) {}
+        fun onMediaReceived(fileName: String, savedPath: String, sizeBytes: Int) {}
     }
 
     private val appContext = context.applicationContext
@@ -53,6 +59,8 @@ class BluetoothChatManager(context: Context) {
     @Volatile private var secureChannel: SecureChannel? = null
     @Volatile private var remoteIdentity: ContactQr.Contact? = null
     @Volatile private var remoteFingerprint: String? = null
+    private val mediaReassemblers = ConcurrentHashMap<String, MediaTransferProtocol.Reassembler>()
+    private val mediaNames = ConcurrentHashMap<String, String>()
     private val mainHandler = Handler(Looper.getMainLooper())
     private val listeners = CopyOnWriteArraySet<Listener>()
     private val adapter: BluetoothAdapter? =
@@ -304,6 +312,13 @@ class BluetoothChatManager(context: Context) {
                     val text = plaintext.toString(StandardCharsets.UTF_8)
                     mainHandler.post { listeners.forEach { it.onMessage(ChatMessage(text, false)) } }
                 }
+                "MEDIA" -> {
+                    val channel = secureChannel ?: throw SecurityException("Unverified peer sent media")
+                    val nonce = Base64.decode(frame.getString("n"), Base64.DEFAULT)
+                    val ciphertext = Base64.decode(frame.getString("c"), Base64.DEFAULT)
+                    val plaintext = channel.decrypt(SecureChannel.Sealed(nonce, ciphertext), MEDIA_AAD)
+                    acceptMediaChunk(JSONObject(plaintext.toString(StandardCharsets.UTF_8)))
+                }
                 else -> throw IllegalArgumentException("Unknown wire frame")
             }
         } catch (error: Exception) {
@@ -330,6 +345,74 @@ class BluetoothChatManager(context: Context) {
         } catch (_: Exception) {
             secureChannel = null
             false
+        }
+    }
+
+    /** Sends bounded file/media chunks through the authenticated encrypted Bluetooth channel. */
+    fun sendMedia(media: ByteArray, fileName: String): Boolean {
+        val channel = secureChannel ?: run {
+            status("Dosya gönderimi için önce QR parmak izi doğrulaması gerekir.")
+            return false
+        }
+        if (socket == null) return false
+        return try {
+            val safeName = fileName.substringAfterLast('/').substringAfterLast('\\')
+                .replace(Regex("[^A-Za-z0-9._-]"), "_").take(80).ifBlank { "media.bin" }
+            val transferId = UUID.randomUUID().toString()
+            val chunks = MediaTransferProtocol.split(transferId, media)
+            for (chunk in chunks) {
+                val payload = JSONObject()
+                    .put("id", chunk.transferId)
+                    .put("name", safeName)
+                    .put("i", chunk.index)
+                    .put("n", chunk.total)
+                    .put("size", chunk.totalBytes)
+                    .put("sha", Base64.encodeToString(chunk.sha256, Base64.NO_WRAP))
+                    .put("data", Base64.encodeToString(chunk.payload, Base64.NO_WRAP))
+                    .toString().toByteArray(StandardCharsets.UTF_8)
+                val sealed = channel.encrypt(payload, MEDIA_AAD)
+                val frame = JSONObject()
+                    .put("t", "MEDIA")
+                    .put("n", Base64.encodeToString(sealed.nonce, Base64.NO_WRAP))
+                    .put("c", Base64.encodeToString(sealed.ciphertext, Base64.NO_WRAP))
+                if (!sendWire(frame)) throw IllegalStateException("Bluetooth write failed")
+            }
+            status("Dosya parçaları şifreli Bluetooth bağlantısından gönderildi: " + safeName)
+            true
+        } catch (_: Exception) {
+            status("Dosya gönderimi başarısız. Boyutu 1–64 MiB aralığında olmalı ve bağlantı açık kalmalı.")
+            false
+        }
+    }
+
+    private fun acceptMediaChunk(payload: JSONObject) {
+        val id = payload.getString("id")
+        require(id.matches(Regex("[A-Za-z0-9_-]{1,64}"))) { "Invalid transfer id" }
+        val name = payload.getString("name").take(100)
+        val index = payload.getInt("i")
+        val total = payload.getInt("n")
+        val size = payload.getInt("size")
+        val digest = Base64.decode(payload.getString("sha"), Base64.DEFAULT)
+        val bytes = Base64.decode(payload.getString("data"), Base64.DEFAULT)
+        val reassembler = mediaReassemblers.computeIfAbsent(id) {
+            mediaNames[id] = name
+            MediaTransferProtocol.Reassembler(id, total, size, digest)
+        }
+        val completed = reassembler.accept(
+            MediaTransferProtocol.Chunk(id, index, total, size, digest, bytes)
+        ) ?: return
+        val safeName = (mediaNames[id] ?: name).substringAfterLast('/').substringAfterLast('\\')
+            .replace(Regex("[^A-Za-z0-9._-]"), "_").take(80).ifBlank { "media.bin" }
+        val directory = appContext.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS)
+            ?: File(appContext.filesDir, "received-media")
+        check(directory.exists() || directory.mkdirs()) { "Cannot create media directory" }
+        val saved = File(directory, id + "_" + safeName)
+        FileOutputStream(saved).use { it.write(completed) }
+        mediaReassemblers.remove(id)
+        mediaNames.remove(id)
+        mainHandler.post {
+            listeners.forEach { it.onMediaReceived(safeName, saved.absolutePath, completed.size) }
+            status("Dosya alındı ve doğrulandı: " + safeName)
         }
     }
 
@@ -363,6 +446,8 @@ class BluetoothChatManager(context: Context) {
         secureChannel = null
         remoteIdentity = null
         remoteFingerprint = null
+        mediaReassemblers.clear()
+        mediaNames.clear()
         mainHandler.post { listeners.forEach { it.onConnectionChanged(null); it.onSecurityChanged(false, null) } }
     }
 
@@ -381,6 +466,7 @@ class BluetoothChatManager(context: Context) {
 
     companion object {
         private val DATA_AAD = "NexoraMesh/data/v1".toByteArray(StandardCharsets.UTF_8)
+        private val MEDIA_AAD = "NexoraMesh/media/v1".toByteArray(StandardCharsets.UTF_8)
         val SERVICE_UUID: UUID = UUID.fromString("0c4e6c7a-3b12-4b8d-a920-5f0c1a2d7e31")
     }
 }
