@@ -157,7 +157,7 @@ final class MeshSecureChat: ObservableObject {
                     return
                 }
                 activateIfTrusted(contact)
-            case "PROOF", "PROOF_ACK", "ACK", "DATA":
+            case "PROOF", "PROOF_ACK", "ACK":
                 guard let key = candidateKey ?? sessionKey else { throw MeshSecureChatError.noSession }
                 let opened = try Self.open(frame, key: key, aad: controlAAD)
                 let control = (try JSONSerialization.jsonObject(with: opened)) as? [String: Any]
@@ -166,15 +166,14 @@ final class MeshSecureChat: ObservableObject {
                           let nonce = control["nonce"] as? String,
                           Data(base64Encoded: nonce)?.count == 32 else { throw MeshSecureChatError.invalidProof }
                     remoteProofReceived = true
-                    sendControl(type: "PROOF_ACK",
-                                payload: ["type": "PROOF_ACK", "nonce": nonce], key: key)
+                    sendControl(type: "PROOF_ACK", payload: ["type": "PROOF_ACK", "nonce": nonce], key: key)
                     maybeActivate()
                 } else if type == "PROOF_ACK" {
                     guard let control, control["type"] as? String == "PROOF_ACK",
                           control["nonce"] as? String == localProofNonce else { throw MeshSecureChatError.invalidProof }
                     localProofAcked = true
                     maybeActivate()
-                } else if type == "ACK" {
+                } else {
                     guard isSecure, let control, control["type"] as? String == "DELIVERY_ACK",
                           let id = control["id"] as? String, UUID(uuidString: id) != nil else {
                         throw MeshSecureChatError.invalidProof
@@ -184,25 +183,26 @@ final class MeshSecureChat: ObservableObject {
                     try savePending(pending)
                     retryCounts.removeValue(forKey: id)
                     if let index = messages.firstIndex(where: { $0.id == id }) { messages[index].delivery = "Teslim edildi" }
-                } else {
-                    guard isSecure, let id = frame["id"] as? String, UUID(uuidString: id) != nil,
-                          let nonceText = frame["n"] as? String,
-                          let cipherText = frame["c"] as? String,
-                          let nonce = Data(base64Encoded: nonceText),
-                          let ciphertext = Data(base64Encoded: cipherText) else { throw MeshSecureChatError.invalidProof }
-                    let plaintext = try Self.open(nonce: nonce, ciphertext: ciphertext, key: key,
-                                                  aad: Data("NexoraMesh/data/v1:\(id)".utf8))
-                    var received = defaults.stringArray(forKey: receivedKey) ?? []
-                    let isNew = !received.contains(id)
-                    if isNew {
-                        received.append(id)
-                        if received.count > 4096 { received.removeFirst(received.count - 4096) }
-                        defaults.set(received, forKey: receivedKey)
-                        messages.append(Message(id: id, text: String(decoding: plaintext, as: UTF8.self),
-                                                outgoing: false, createdAt: Date(), delivery: "Alındı"))
-                    }
-                    sendControl(type: "ACK", payload: ["type": "DELIVERY_ACK", "id": id], key: key)
                 }
+            case "DATA":
+                guard isSecure, let key = sessionKey, let id = frame["id"] as? String,
+                      UUID(uuidString: id) != nil,
+                      let nonceText = frame["n"] as? String,
+                      let cipherText = frame["c"] as? String,
+                      let nonce = Data(base64Encoded: nonceText),
+                      let ciphertext = Data(base64Encoded: cipherText) else { throw MeshSecureChatError.invalidProof }
+                let plaintext = try Self.open(nonce: nonce, ciphertext: ciphertext, key: key,
+                                              aad: Data("NexoraMesh/data/v1:\\(id)".utf8))
+                var received = defaults.stringArray(forKey: receivedKey) ?? []
+                let isNew = !received.contains(id)
+                if isNew {
+                    received.append(id)
+                    if received.count > 4096 { received.removeFirst(received.count - 4096) }
+                    defaults.set(received, forKey: receivedKey)
+                    messages.append(Message(id: id, text: String(decoding: plaintext, as: UTF8.self),
+                                            outgoing: false, createdAt: Date(), delivery: "Alındı"))
+                }
+                sendControl(type: "ACK", payload: ["type": "DELIVERY_ACK", "id": id], key: key)
             default:
                 throw MeshSecureChatError.invalidFrame
             }
@@ -356,17 +356,6 @@ final class MeshSecureChat: ObservableObject {
         defaults.set(try JSONEncoder().encode(pending), forKey: pendingKey)
     }
 
-    private func scheduleRetry(id: String, attempt: Int) {
-        guard attempt <= 8 else { return }
-        retryCounts[id] = attempt
-        DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
-            guard let self, self.loadPending().contains(where: { $0.id == id }) else { return }
-            guard let frame = self.loadPending().first(where: { $0.id == id })?.frame,
-                  let sendPacket = self.sendPacket else { return }
-            sendPacket(frame)
-            self.scheduleRetry(id: id, attempt: attempt + 1)
-        }
-    }
 
     private static func fingerprint(_ key: Data) -> String {
         SHA256.hash(data: key).prefix(20).map { String(format: "%02X", $0) }.joined(separator: ":")
