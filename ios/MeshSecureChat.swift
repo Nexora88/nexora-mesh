@@ -243,7 +243,7 @@ final class MeshSecureChat: ObservableObject {
         guard let publicKey = SecKeyCopyPublicKey(privateKey) else { throw MeshSecureChatError.keyStore }
         var error: Unmanaged<CFError>?
         guard let raw = SecKeyCopyExternalRepresentation(publicKey, &error) as Data? else {
-            throw error?.takeRetainedValue() ?? MeshSecureChatError.keyStore as CFError
+            throw error?.takeRetainedValue() ?? (NSError(domain: "NexoraMesh.KeyStore", code: 2) as CFError)
         }
         // SubjectPublicKeyInfo prefix for id-ecPublicKey / prime256v1, matching Java X.509 encoding.
         let prefix = Data([0x30,0x59,0x30,0x13,0x06,0x07,0x2A,0x86,0x48,0xCE,0x3D,0x02,0x01,
@@ -280,7 +280,7 @@ final class MeshSecureChat: ObservableObject {
             var error: Unmanaged<CFError>?
             guard let shared = SecKeyCopyKeyExchangeResult(privateKey, .ecdhKeyExchangeStandard,
                                                            remoteKey, [:] as CFDictionary, &error) as Data? else {
-                throw error?.takeRetainedValue() ?? MeshSecureChatError.keyStore as CFError
+                throw error?.takeRetainedValue() ?? (NSError(domain: "NexoraMesh.KeyStore", code: 2) as CFError)
             }
             let kdfKey = SymmetricKey(data: Data("NexoraMesh/session-key/v1".utf8))
             let key = SymmetricKey(data: Data(HMAC<SHA256>.authenticationCode(for: shared, using: kdfKey)))
