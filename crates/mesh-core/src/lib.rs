@@ -66,16 +66,25 @@ mod tests {
 
     #[test]
     fn truncated_payload_rejected() {
-        assert_eq!(decode_frame(&[0, 0, 0, 3, b'a']), Err(FrameError::PayloadTruncated));
+        assert_eq!(
+            decode_frame(&[0, 0, 0, 3, b'a']),
+            Err(FrameError::PayloadTruncated)
+        );
     }
 
     #[test]
     fn oversized_payload_rejected() {
-        assert_eq!(decode_frame(&[0, 0x10, 0, 1]), Err(FrameError::PayloadTooLarge));
+        assert_eq!(
+            decode_frame(&[0, 0x10, 0, 1]),
+            Err(FrameError::PayloadTooLarge)
+        );
     }
 
     #[test]
     fn trailing_bytes_rejected() {
-        assert_eq!(decode_frame(&[0, 0, 0, 1, b'a', b'b']), Err(FrameError::TrailingBytes));
+        assert_eq!(
+            decode_frame(&[0, 0, 0, 1, b'a', b'b']),
+            Err(FrameError::TrailingBytes)
+        );
     }
 }
