@@ -1,0 +1,11 @@
+{
+  "name": "Nexora Mesh Yönetim",
+  "short_name": "Nexora",
+  "description": "Offline-capable management console for Nexora Mesh (no radio)",
+  "start_url": "./",
+  "display": "standalone",
+  "background_color": "#07110F",
+  "theme_color": "#07110F",
+  "lang": "tr",
+  "icons": []
+}

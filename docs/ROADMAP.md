@@ -25,17 +25,19 @@
 - [ ] Reconnect, retry, replay protection, and key-change warnings
 
 ## M3 — Range extension and emergency resilience
-- [ ] Message IDs, expiry, hop limit, deduplication, and store-and-forward queue
-- [ ] Explicit relay opt-in and battery/thermal safeguards
-- [ ] Ensure relays cannot read message plaintext
-- [ ] Multi-device integration tests with controlled packet loss
+- [x] Message IDs, expiry, hop limit, deduplication, and store-and-forward queue (Rust in-memory + snapshot API)
+- [x] Explicit relay opt-in foundation and battery/thermal-aware scan policy (SmartRelayPolicy)
+- [ ] Ensure relays cannot read message plaintext (opaque envelope enforced; E2E still pending)
+- [x] Multi-device integration tests with controlled packet loss (in-memory A→B→C simulation)
 - [ ] Field tests across line-of-sight and obstructed terrain; publish measured results only
 - [ ] Clear emergency limitations and failed-delivery UX
+- [ ] Physical-device verification of encrypted A→B→C transfer, persistent queue, TTL, dedup and delivery confirmation
 
 ## M4 — Everyday messenger experience
 - [ ] File transfer with size limits and integrity checks
 - [ ] Accessibility and Turkish/English localization
 - [ ] Audio/video feasibility study for local links
 - [ ] Battery, reconnect, and privacy testing
+- [ ] Installable PWA management console + native desktop radio bridge (Tauri or equivalent)
 
 A UI mockup does not count as a working transport. A wider mesh can improve reach, but does not guarantee a range or delivery.

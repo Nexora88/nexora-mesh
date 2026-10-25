@@ -2,7 +2,7 @@
 
 **An offline-first messenger project for Android and Apple platforms, designed with resilient communication in mind.** The long-term goal is more than an anonymous chat app: build a recognizable, trustworthy messaging brand that can help people communicate when connectivity is disrupted by wildfires, earthquakes, floods, or mountain search-and-rescue operations.
 
-> **Honest status:** Early prototype. The Android screen is a local UI prototype, and ios/NexoraMeshApp.swift is a SwiftUI interface starter. Real device discovery, pairing, two-device message delivery, end-to-end encryption, and mesh relaying are not implemented yet. This is not ready for emergency use.
+> **Honest status:** Early prototype. The Android screen is a local UI prototype, and ios/NexoraMeshApp.swift is a SwiftUI interface starter. Real device discovery, pairing, two-device message delivery, end-to-end encryption, and physical mesh relaying are not implemented yet. This is not ready for emergency use.
 
 ## Product vision
 
@@ -23,13 +23,16 @@ Privacy should be the default. Devices should be undiscoverable when possible un
 - [x] SwiftUI interface starter for Apple platforms
 - [x] Rust frame codec and tests
 - [x] Product vision, threat model, and roadmap
+- [x] Rust RelayQueue (bounded, dedup, TTL/hops, snapshot/restore) + in-memory A→B→C simulation tests
+- [x] Smart power-aware scan interval policy (battery, charging, low-power, foreground signals)
 - [ ] Android CI build and physical-device installation verified
 - [ ] Xcode project and physical iOS build
 - [ ] Bluetooth discovery and trusted pairing
 - [ ] Encrypted text delivery between two real devices with internet disabled
-- [ ] Persistent chat history and delivery states
-- [ ] Opt-in mesh relaying and field range tests
+- [ ] Persistent chat history and delivery states (host-side durable storage of snapshots)
+- [ ] Opt-in mesh relaying and field range tests on physical devices
 - [ ] File, audio, and video calls
+- [ ] Installable PWA management console + native desktop radio bridge
 
 Do not describe unfinished items as implemented.
 
@@ -37,16 +40,17 @@ Do not describe unfinished items as implemented.
 
 - android/ — Android app shell
 - ios/ — SwiftUI interface starter and Apple platform notes
-- crates/mesh-core/ — Rust protocol core
+- crates/mesh-core/ — Rust protocol core (framing + relay queue + power policy)
 - docs/PRODUCT_VISION.md — product vision and privacy rules
 - docs/PROTOCOL.md — protocol notes
 - docs/THREAT_MODEL.md — security boundaries and risks
 - docs/ROADMAP.md — development milestones
+- docs/STORE_FORWARD_POWER_DESKTOP.md — store-and-forward, power policy and desktop notes
 - tools/ — Python reference utilities and tests
 
 ## Range limitations
 
-Bluetooth and Wi-Fi Direct do not provide unlimited range. Hardware, terrain, obstacles, interference, and battery state all matter. Multi-hop relaying may extend the paths a message can travel, but cannot guarantee delivery or a particular distance. Relaying is not implemented yet.
+Bluetooth and Wi-Fi Direct do not provide unlimited range. Hardware, terrain, obstacles, interference, and battery state all matter. Multi-hop relaying may extend the paths a message can travel, but cannot guarantee delivery or a particular distance. Physical relaying is not yet verified on devices.
 
 ## Security principles
 
@@ -58,4 +62,4 @@ Bluetooth and Wi-Fi Direct do not provide unlimited range. Hardware, terrain, ob
 6. Do not claim emergency readiness before real field testing.
 7. Keep internet permission out of the Android manifest unless a documented requirement justifies it.
 
-See docs/PRODUCT_VISION.md, docs/PROTOCOL.md, docs/THREAT_MODEL.md, and SECURITY.md.
+See docs/PRODUCT_VISION.md, docs/PROTOCOL.md, docs/THREAT_MODEL.md, docs/STORE_FORWARD_POWER_DESKTOP.md and SECURITY.md.
