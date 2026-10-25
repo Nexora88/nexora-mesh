@@ -6,8 +6,7 @@ The C ABI shim is implemented in `crates/mesh-core/src/ffi.rs`, with the public 
 `crates/mesh-core/include/nexora_mesh.h`. Android JNI/CMake wiring and an iOS XCFramework build
 script are present; Android BLE GATT and iOS CoreBluetooth transport source are present. CI builds
 are the first validation layer, not proof of a signed, installable iOS app or physical-device
-interoperability. The transport does **not** implement E2EE, QR identity verification, or a complete
-application message/session protocol. Android's existing live chat still uses Bluetooth Classic.
+interoperability. Android now routes the existing QR-trust and AES-GCM wire protocol through the BLE packet boundary, including GATT notifications for the return direction. This is an experimental integration, not an audited secure messenger. The iOS app still does not implement the matching QR trust store, compatible identity/key agreement, encrypted session handshake, or live chat UI; iOS BLE remains transport-only. Android Bluetooth Classic remains available as the existing chat path.
 
 ## Shared peer trust flow
 
@@ -71,12 +70,10 @@ or local Wi-Fi when both devices support it; iOS interoperability still needs me
 
 ## Current implementation gaps
 
-- BLE transport is not yet connected end-to-end to the QR-trusted-contact gate, encryption/session
-  handshake, chat UI, or durable message store-and-forward queue.
-- The fragment format has no end-to-end delivery acknowledgement, retry/resume protocol, or expiry
-  cleanup for stalled assemblies. A successful GATT write is not proof that a chat message was
-  accepted by the recipient.
-- Android Classic remains the current chat path; BLE is an additional transport prototype.
+- Android BLE now enters the existing QR-trusted-contact gate and encrypted chat wire protocol; text messages appear in the existing Android chat UI. Both GATT central writes and peripheral notifications are implemented in source, but the integration is not yet proven on physical devices.
+- The Android session still uses static P-256 ECDH identity keys and a custom HMAC-derived AES-GCM key. It does not provide forward secrecy, directional keys, a reviewed standard session protocol, or an independent cryptographic audit. Do not describe it as production-grade E2EE.
+- Android suppresses duplicate message IDs only in the current in-memory session (bounded cache); replay IDs are not durable across process restarts. Delivery ACKs, retry/resume, durable offline queue, and exactly-once semantics are not implemented. A successful GATT write is not proof that the recipient accepted the message.
+- iOS BLE now has notification-based return transport, but its UI, QR identity, compatible cryptographic handshake, and chat-message path are not connected. Android↔iOS secure chat is therefore not implemented yet.
 - No physical Android↔iPhone roundtrip or three-device A→B→C test has been performed by CI.
 - Voice/video calls and a custom media codec are not implemented.
 
