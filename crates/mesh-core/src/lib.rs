@@ -1,5 +1,6 @@
 //! Transport-independent framing primitives. Framing is not encryption or authentication.
 pub mod relay;
+pub mod wire;
 
 use std::convert::TryInto;
 
