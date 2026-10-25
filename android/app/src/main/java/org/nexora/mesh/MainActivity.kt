@@ -70,6 +70,9 @@ private fun MeshTheme(content: @Composable () -> Unit) {
 private fun MeshApp() {
     val context = androidx.compose.ui.platform.LocalContext.current
     val manager = remember { BluetoothChatManager(context) }
+    val bleTransport = remember { BleGattTransport(context) }
+    var blePeers by remember { mutableStateOf<List<BleGattTransport.Peer>>(emptyList()) }
+    var bleStatus by remember { mutableStateOf("BLE taşıması henüz başlatılmadı.") }
     var selectedTab by remember { mutableIntStateOf(0) }
     var scanning by remember { mutableStateOf(false) }
     var devices by remember { mutableStateOf<List<BluetoothChatManager.Peer>>(emptyList()) }
@@ -105,6 +108,44 @@ private fun MeshApp() {
     val permissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { grants ->
         if (grants.values.all { it }) manager.startDiscovery()
         else status = "Cihaz keşfi için Bluetooth izinleri verilmedi."
+    }
+
+    val blePermissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { grants ->
+        if (grants.values.all { it }) bleTransport.start()
+        else bleStatus = "BLE keşfi/yayını için Bluetooth izinleri verilmedi."
+    }
+
+    DisposableEffect(bleTransport) {
+        bleTransport.setListener(object : BleGattTransport.Listener {
+            override fun onPeers(peers: List<BleGattTransport.Peer>) { blePeers = peers }
+            override fun onStatus(value: String) { bleStatus = value }
+            override fun onPacket(packet: ByteArray) {
+                bleStatus = try {
+                    val code = NativeMesh.validate(packet)
+                    if (code == 0) "Rust doğrulamasından geçen zarf alındı; uygulama mesajı/kimlik doğrulaması henüz bağlı değil."
+                    else "BLE paketi alındı fakat Rust zarf doğrulaması başarısız ($code)."
+                } catch (_: Exception) {
+                    "BLE paketi alındı fakat Rust JNI köprüsü kullanılamıyor."
+                }
+            }
+        })
+        onDispose {
+            bleTransport.setListener(null)
+            bleTransport.stop()
+        }
+    }
+
+    fun startBleOrRequest() {
+        val required = if (Build.VERSION.SDK_INT >= 31) arrayOf(
+            Manifest.permission.BLUETOOTH_SCAN,
+            Manifest.permission.BLUETOOTH_CONNECT,
+            Manifest.permission.BLUETOOTH_ADVERTISE
+        ) else arrayOf(Manifest.permission.ACCESS_FINE_LOCATION)
+        if (required.all { ContextCompat.checkSelfPermission(context, it) == PackageManager.PERMISSION_GRANTED }) {
+            bleTransport.start()
+        } else {
+            blePermissionLauncher.launch(required)
+        }
     }
 
     val mediaPickerLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
@@ -170,6 +211,10 @@ private fun MeshApp() {
                         status = status,
                         onScan = ::scanOrRequest,
                         onListen = { if (manager.hasPermissions()) manager.startListening() else scanOrRequest() },
+                        blePeers = blePeers,
+                        bleStatus = bleStatus,
+                        onBleStart = ::startBleOrRequest,
+                        onBleConnect = { peer -> bleTransport.connect(peer) },
                         onDevice = { peer ->
                             activePeer = peer
                             if (peer.bonded) manager.connect(peer.device) else manager.pair(peer.device)
@@ -258,6 +303,10 @@ private fun DevicesScreen(
     status: String,
     onScan: () -> Unit,
     onListen: () -> Unit,
+    blePeers: List<BleGattTransport.Peer>,
+    bleStatus: String,
+    onBleStart: () -> Unit,
+    onBleConnect: (BleGattTransport.Peer) -> Unit,
     onDevice: (BluetoothChatManager.Peer) -> Unit
 ) {
     Column(Modifier.fillMaxSize().padding(horizontal = 18.dp)) {
@@ -283,7 +332,29 @@ private fun DevicesScreen(
                 }
             }
         }
-        Text("Not: İlk sürüm Bluetooth Classic kullanır. Her iki cihazda uygulama açık olmalı; bir cihaz gelen bağlantıyı beklerken diğerinden eşleştirilmiş cihaza bağlan. Çok atlamalı mesh aktarımı ve uçtan uca şifreleme henüz eklenmedi.", color = MeshMuted, fontSize = 11.sp, modifier = Modifier.padding(vertical = 8.dp))
+        HorizontalDivider(color = Color(0xFF1B3029), modifier = Modifier.padding(vertical = 8.dp))
+        Text("Ortak BLE GATT", color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+        Text("BLE keşif/bağlantı taşıması. Bu ekran henüz sohbet metnini BLE zarfına bağlamaz.", color = MeshMuted, fontSize = 12.sp)
+        Button(onClick = onBleStart, modifier = Modifier.fillMaxWidth()) { Text("BLE taşımasını başlat") }
+        Text(bleStatus, color = MeshGreen, fontSize = 12.sp)
+        LazyColumn(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            items(blePeers, key = { it.device.address }) { peer ->
+                Row(
+                    Modifier.fillMaxWidth().background(MeshSurface, RoundedCornerShape(14.dp))
+                        .clickable { onBleConnect(peer) }.padding(12.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(Icons.Default.Devices, null, tint = MeshGreen)
+                    Spacer(Modifier.width(10.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text(peer.label, color = Color.White, fontWeight = FontWeight.SemiBold)
+                        Text(peer.device.address, color = MeshMuted, fontSize = 10.sp)
+                    }
+                    Text("BAĞLAN", color = MeshGreen, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                }
+            }
+        }
+        Text("Bluetooth Classic sohbeti ve BLE GATT taşıması şu anda ayrı prototiplerdir. BLE paketleri Rust zarf doğrulamasına aktarılabilir; uygulama düzeyinde mesaj, QR kimlik doğrulaması ve E2EE henüz BLE üzerinden tamamlanmamıştır.", color = MeshMuted, fontSize = 11.sp, modifier = Modifier.padding(vertical = 8.dp))
     }
 }
 
