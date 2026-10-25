@@ -14,7 +14,7 @@ Bu belge bir tasarım ve prototip sınırıdır; telefonlar arasında çalışan
 
 `crates/mesh-core/src/relay.rs` transport bağımsız bir Rust prototipi sağlar:
 - opak şifreli yük için 256 KiB sınırı;
-- en fazla 8 atlama;
+- en fazla 5 atlama (wire codec tarafından da doğrulanır);
 - son kullanma zamanı kontrolü;
 - tekrar iletimini azaltan sınırlı yinelenen mesaj önbelleği;
 - sınırlı RAM kuyruğu ve kuyruk testleri.
@@ -35,3 +35,10 @@ Rastgele bir videoyu 10 MB'tan 50 KB'a kayıpsız biçimde dönüştüren genel 
 - çok düşük bant genişliğinde isteğe bağlı ayrı özet/thumbnail veya özel animasyon temsili.
 
 Önce metin rölesi, kimlik ve şifreleme güvenilir şekilde tamamlanmalı; medya bundan sonra eklenmelidir.
+
+
+## Sürüm 1 ikili zarf biçimi
+
+`crates/mesh-core/src/wire.rs` artık transporttan bağımsız, sürümlenmiş bir ikili zarf kodlayıcı/çözücü sağlar. Biçim: `NM` sihri, sürüm, 128-bit mesaj kimliği, 128-bit opak hedef belirteci, 1-byte kalan atlama bütçesi, 64-bit Unix son kullanma zamanı, 32-bit şifreli gövde uzunluğu ve şifreli gövde. Kodlayıcı/çözücü boş/çok büyük gövdeyi, desteklenmeyen sürümü, geçersiz TTL/hop alanını, kesik veriyi ve sondaki fazladan baytları reddeder.
+
+Bu, JNI veya Swift köprüsünün ve BLE GATT taşımasının yerine geçmez; şu an bu ortak wire codec'i Android/iOS radyo koduna bağlayan native köprü yoktur. Hedef belirteci de kendi başına kriptografik hash üretmez: uygulama, güvenilir kişi kimliğinden tek yönlü bir belirteç türetmeli ve metadata sızıntısı riskini ayrıca ele almalıdır.
