@@ -128,6 +128,10 @@ private fun MeshApp() {
                 manager.attachBleTransport(peerLabel) { packet -> bleTransport.sendEnvelope(packet) }
                 bleStatus = "BLE çift yönlü kanal hazır; QR ile güven doğrulaması bekleniyor."
             }
+            override fun onDisconnected() {
+                manager.closeConnection()
+                bleStatus = "BLE bağlantısı kesildi; güvenli oturum kapatıldı."
+            }
         })
         onDispose {
             bleTransport.setListener(null)
