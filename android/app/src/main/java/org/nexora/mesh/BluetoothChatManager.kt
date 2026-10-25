@@ -620,13 +620,21 @@ class BluetoothChatManager(context: Context) {
     }
 
     private fun scheduleDeliveryRetry(id: String, attempt: Int) {
+        if (attempt == 0) {
+            if (retryAttempts.putIfAbsent(id, 0) != null) return
+        } else {
+            retryAttempts[id] = attempt
+        }
         if (attempt >= MAX_DELIVERY_RETRIES) {
             status("Teslim onayı gelmedi; mesaj kalıcı kuyrukta tutuluyor: " + id)
             return
         }
         mainHandler.postDelayed({
             val raw = synchronized(pendingLock) { pendingMessages[id] }
-            if (raw == null) return@postDelayed
+            if (raw == null) {
+                retryAttempts.remove(id)
+                return@postDelayed
+            }
             val channel = secureChannel
             if (channel != null) {
                 try {
