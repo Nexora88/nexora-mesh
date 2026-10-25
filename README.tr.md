@@ -84,3 +84,8 @@ Herhangi bir videoyu 10 MB'tan 50 KB'a dönüştürüp aynı kaliteyle yeniden k
 7. Belgelenmiş gereklilik olmadıkça Android manifestine internet izni eklenmeyecek.
 
 Ayrıntılar: docs/PRODUCT_VISION.md, docs/PROTOCOL.md, docs/RELAY_ROUTING.md, docs/THREAT_MODEL.md ve SECURITY.md.
+
+
+## Gizlilik ve güvenlik durumu
+
+Android BLE aktarımı deneysel olarak mevcut QR güveni ve şifreli sohbet protokolüne bağlandı. Bağımsız güvenlik denetimi yapılmadı ve ileriye dönük gizlilik (forward secrecy) yok; iOS hâlâ yalnızca taşıma katmanıdır ve Android↔iOS şifreli sohbet tamamlanmadı. [Gizlilik/güvenlik tehdit modelini](docs/PRIVACY_SECURITY.md) ve [platformlar arası taşıma durumunu](docs/CROSS_PLATFORM_TRANSPORT.md) incele. Bu prototipi acil durum garantisi veya çok hassas iletişim için kullanma.
