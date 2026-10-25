@@ -74,3 +74,12 @@ See docs/PRODUCT_VISION.md, docs/PROTOCOL.md, docs/THREAT_MODEL.md, and SECURITY
 ## Privacy and security status
 
 The Android BLE path is experimentally connected to the existing QR-trust and encrypted chat protocol. It is not independently audited and does not provide forward secrecy; iOS remains transport-only and Android↔iOS encrypted chat is not complete. See [the privacy/security threat model](docs/PRIVACY_SECURITY.md) and [cross-platform transport status](docs/CROSS_PLATFORM_TRANSPORT.md). Do not use this prototype for emergency guarantees or highly sensitive communication.
+
+
+## Installable web / desktop management console
+
+A progressive web app (PWA) management console is available under [web/](web/). Serve it over HTTPS (or localhost for development), open it in a supported browser, and choose **Install app** / **Add to Home Screen**. Its shell is cached for offline reopening after the first successful load.
+
+**Important:** this PWA is currently a management UI for local contact labels and drafts. It does not have access to the native radio transport, does not cryptographically verify pasted QR payloads, and deliberately does not send messages. The chat UI becomes a real messenger only after the native bridge, trusted identity verification, session encryption, and delivery/ACK path are connected. A desktop native shell with signed BLE drivers is still a separate release task.
+
+See [store-and-forward, power policy and desktop integration](docs/STORE_FORWARD_POWER_DESKTOP.md) for implemented primitives and the remaining native integration work.
