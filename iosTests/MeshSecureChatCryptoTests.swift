@@ -1,0 +1,64 @@
+import XCTest
+import CryptoKit
+@testable import NexoraMesh
+
+final class MeshSecureChatCryptoTests: XCTestCase {
+    func testSharedV1KDFVectorMatchesAndroidContract() {
+        let secret = Data(0..<32)
+        let expected = "f686564b5419341dd9eaa8bcfa472c607e046069d08e66243c97a0fa180d0162"
+        let key = MeshSecureChat.deriveSessionKey(sharedSecret: secret)
+        let actual = key.withUnsafeBytes { Data($0).map { String(format: "%02x", $0) }.joined() }
+        XCTAssertEqual(actual, expected)
+    }
+
+    func testFingerprintVectorMatchesAndroidContract() {
+        XCTAssertEqual(
+            MeshSecureChat.fingerprint(Data([0x30, 0x00])),
+            "E4:F6:0D:0A:A6:D7:F3:D3:B6:A6:49:4B:1C:86:1B:99:F6:49:C6:F9"
+        )
+    }
+
+    func testTamperedCiphertextIsRejected() throws {
+        let key = SymmetricKey(data: Data(repeating: 7, count: 32))
+        let aad = Data("NexoraMesh/data/v1:test".utf8)
+        let sealed = try MeshSecureChat.seal(Data("hello".utf8), key: key, aad: aad)
+        var tampered = sealed.ciphertext
+        tampered[0] ^= 0x01
+        XCTAssertThrowsError(try MeshSecureChat.open(
+            nonce: sealed.nonce, ciphertext: tampered, key: key, aad: aad
+        ))
+    }
+
+    func testWrongAssociatedDataIsRejected() throws {
+        let key = SymmetricKey(data: Data(repeating: 9, count: 32))
+        let sealed = try MeshSecureChat.seal(
+            Data("hello".utf8), key: key, aad: Data("recipient-A".utf8)
+        )
+        XCTAssertThrowsError(try MeshSecureChat.open(
+            nonce: sealed.nonce, ciphertext: sealed.ciphertext, key: key,
+            aad: Data("recipient-B".utf8)
+        ))
+    }
+
+    func testMalformedNonceIsRejected() {
+        let key = SymmetricKey(data: Data(repeating: 1, count: 32))
+        XCTAssertThrowsError(try MeshSecureChat.open(
+            nonce: Data([1, 2]), ciphertext: Data(repeating: 0, count: 16),
+            key: key, aad: Data()
+        ))
+    }
+
+    func testReplayAndMalformedMessageIDsAreRejected() {
+        let id = "123e4567-e89b-12d3-a456-426614174000"
+        XCTAssertTrue(MeshSecureChat.acceptMessageID(id, seen: []))
+        XCTAssertFalse(MeshSecureChat.acceptMessageID(id, seen: [id]))
+        XCTAssertFalse(MeshSecureChat.acceptMessageID("not-a-uuid", seen: []))
+    }
+
+    func testMalformedWirePacketDoesNotCreateMessage() {
+        let chat = MeshSecureChat()
+        chat.receive(Data("not-json".utf8))
+        XCTAssertTrue(chat.messages.isEmpty)
+        XCTAssertTrue(chat.status.contains("Paket reddedildi"))
+    }
+}
