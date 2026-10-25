@@ -277,7 +277,7 @@ private fun SecurityScreen(connectionName: String?) {
             onClick = {
                 val host = activity
                 if (host == null) scanStatus = "QR tarayıcı bu ekrandan açılamıyor."
-                else scanner.launch(IntentIntegrator(host).setDesiredBarcodeFormats(IntentIntegrator.QR_CODE).setPrompt("Nexora Mesh kişi QR kodunu tara").setBeepEnabled(false).setOrientationLocked(false).createScanIntent())
+                else scanner.launch(IntentIntegrator(host).setDesiredBarcodeFormats(listOf(IntentIntegrator.QR_CODE)).setPrompt("Nexora Mesh kişi QR kodunu tara").setBeepEnabled(false).setOrientationLocked(false).createScanIntent())
             },
             modifier = Modifier.fillMaxWidth()
         ) { Text("QR tara ve kişiyi doğrula") }
