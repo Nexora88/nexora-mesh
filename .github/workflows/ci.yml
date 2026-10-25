@@ -32,6 +32,13 @@ jobs:
         with:
           gradle-version: "8.9"
       - run: gradle -p android assembleDebug
+      - name: Upload installable debug APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: nexora-mesh-android-debug
+          path: android/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+          retention-days: 14
   python:
     runs-on: ubuntu-latest
     steps:
