@@ -59,7 +59,67 @@ impl Envelope {
     }
 }
 
-"+policy+"/// Small bounded in-memory queue and duplicate cache for a relay node.
+/// Coarse power/activity state supplied by the native host; no background work is
+/// performed by this policy itself. Native Android/iOS schedulers must honor OS limits.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct RelayPowerState {
+    pub battery_percent: u8,
+    pub charging: bool,
+    pub low_power_mode: bool,
+    pub app_foreground: bool,
+    pub recently_connected: bool,
+    pub urgent_pending: bool,
+}
+
+/// Battery-aware scan cadence. Values are recommendations, not a promise that the OS
+/// will schedule BLE work at these intervals.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct SmartRelayPolicy {
+    pub minimum_battery_percent: u8,
+    pub foreground_scan_seconds: u64,
+    pub idle_scan_seconds: u64,
+    pub deep_sleep_seconds: u64,
+}
+
+impl Default for SmartRelayPolicy {
+    fn default() -> Self {
+        Self {
+            minimum_battery_percent: 15,
+            foreground_scan_seconds: 5,
+            idle_scan_seconds: 45,
+            deep_sleep_seconds: 300,
+        }
+    }
+}
+
+impl SmartRelayPolicy {
+    pub fn may_scan(&self, state: RelayPowerState) -> bool {
+        state.app_foreground
+            || state.charging
+            || (state.battery_percent >= self.minimum_battery_percent && !state.low_power_mode)
+    }
+
+    pub fn may_relay(&self, state: RelayPowerState, opted_in: bool) -> bool {
+        opted_in
+            && self.may_scan(state)
+            && (state.app_foreground
+                || state.charging
+                || state.battery_percent >= self.minimum_battery_percent)
+    }
+
+    pub fn recommended_scan_interval_seconds(&self, state: RelayPowerState) -> u64 {
+        if !self.may_scan(state) {
+            return self.deep_sleep_seconds;
+        }
+        if state.app_foreground || state.charging || state.recently_connected || state.urgent_pending {
+            self.foreground_scan_seconds
+        } else {
+            self.idle_scan_seconds
+        }
+    }
+}
+
+/// Small bounded in-memory queue and duplicate cache for a relay node.
 /// Persistence and background service integration are intentionally left to the app layer.
 #[derive(Debug)]
 pub struct RelayQueue {
