@@ -25,6 +25,8 @@ final class MeshBLETransport: NSObject, ObservableObject {
     private var subscribedCentrals: [CBCentral] = []
     private var assemblies: [String: Assembly] = [:]
     private var pendingWrites: [Data] = []
+    private var pendingNotifications: [Data] = []
+    private var notificationOffset = 0
     private var currentTransferID: Data?
     private var nextFragmentIndex = 0
 
@@ -74,6 +76,8 @@ final class MeshBLETransport: NSObject, ObservableObject {
         remoteCharacteristic = nil
         assemblies.removeAll()
         pendingWrites.removeAll()
+        pendingNotifications.removeAll()
+        notificationOffset = 0
         status = "Bağlantı kapatıldı."
     }
 
@@ -82,12 +86,25 @@ final class MeshBLETransport: NSObject, ObservableObject {
             status = "Paket boş veya izin verilen boyuttan büyük."
             return
         }
-        guard let peer = connectedPeripheral, let characteristic = remoteCharacteristic else {
-            status = "Önce bir BLE cihazına bağlan."
+
+        let transferID = Data((0..<16).map { _ in UInt8.random(in: 0...255) })
+        let maxPayload: Int
+        let sendAsCentral: Bool
+        if let peer = connectedPeripheral, remoteCharacteristic != nil {
+            maxPayload = peer.maximumWriteValueLength(for: .withResponse) - Self.headerBytes
+            sendAsCentral = true
+        } else if !subscribedCentrals.isEmpty, characteristic != nil {
+            maxPayload = peripheralManager.maximumUpdateValueLength - Self.headerBytes
+            sendAsCentral = false
+        } else {
+            status = "Önce çift yönlü BLE bağlantısı kur."
             return
         }
-        let maxPayload = max(1, peer.maximumWriteValueLength(for: .withResponse) - Self.headerBytes)
-        let transferID = Data((0..<16).map { _ in UInt8.random(in: 0...255) })
+        guard maxPayload > 0 else {
+            status = "BLE MTU, güvenli parça başlığı için yetersiz."
+            return
+        }
+
         let count = Int(ceil(Double(envelope.count) / Double(maxPayload)))
         guard count <= Int(UInt16.max) else { status = "Paket çok fazla parçaya bölünüyor."; return }
         var fragments = [Data]()
@@ -102,26 +119,32 @@ final class MeshBLETransport: NSObject, ObservableObject {
             fragment.append(envelope[start..<end])
             fragments.append(fragment)
         }
-        pendingWrites = fragments
-        currentTransferID = transferID
-        nextFragmentIndex = 0
-        writeNext(peer: peer, characteristic: characteristic)
+
+        if sendAsCentral, let peer = connectedPeripheral, let remote = remoteCharacteristic {
+            pendingWrites = fragments
+            currentTransferID = transferID
+            nextFragmentIndex = 0
+            writeNext(peer: peer, characteristic: remote)
+        } else {
+            pendingNotifications = fragments
+            notificationOffset = 0
+            flushNotifications()
+        }
     }
 
-    private func writeNext(peer: CBPeripheral, characteristic: CBCharacteristic) {
-        guard nextFragmentIndex < pendingWrites.count else {
-            pendingWrites.removeAll()
-            status = "Paket BLE üzerinden aktarıldı; karşı tarafın uygulama onayı ayrıca gerekir."
-            return
+    private func flushNotifications() {
+        guard let characteristic else { return }
+        while notificationOffset < pendingNotifications.count {
+            let next = pendingNotifications[notificationOffset]
+            guard peripheralManager.updateValue(next, for: characteristic, onSubscribedCentrals: subscribedCentrals) else {
+                status = "BLE bildirim kuyruğu dolu; gönderim akışı bekletildi."
+                return
+            }
+            notificationOffset += 1
         }
-        let data = pendingWrites[nextFragmentIndex]
-        if peer.canSendWriteWithoutResponse {
-            peer.writeValue(data, for: characteristic, type: .withoutResponse)
-            nextFragmentIndex += 1
-            writeNext(peer: peer, characteristic: characteristic)
-        } else {
-            peer.writeValue(data, for: characteristic, type: .withResponse)
-        }
+        pendingNotifications.removeAll()
+        notificationOffset = 0
+        status = "Paket BLE bildirim kuyruğundan aktarıldı; uygulama teslim onayı ayrıca gerekir."
     }
 
     private func acceptFragment(_ data: Data) {
@@ -263,6 +286,10 @@ extension MeshBLETransport: CBPeripheralManagerDelegate {
         guard error == nil else { status = "BLE GATT servisi kurulamadı."; return }
         peripheralManager.startAdvertising([CBAdvertisementDataServiceUUIDsKey: [Self.serviceUUID],
                                             CBAdvertisementDataLocalNameKey: "Nexora Mesh"])
+    }
+
+    func peripheralManagerIsReady(toUpdateSubscribers peripheral: CBPeripheralManager) {
+        flushNotifications()
     }
 
     func peripheralManager(_ peripheral: CBPeripheralManager, central: CBCentral, didSubscribeTo characteristic: CBCharacteristic) {
