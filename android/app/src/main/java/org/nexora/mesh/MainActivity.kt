@@ -8,6 +8,8 @@ import androidx.activity.compose.setContent
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -31,6 +33,8 @@ import androidx.compose.foundation.Image
 import android.graphics.Bitmap
 import com.google.zxing.BarcodeFormat
 import com.google.zxing.MultiFormatWriter
+import com.journeyapps.barcodescanner.ScanContract
+import com.journeyapps.barcodescanner.ScanOptions
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -70,6 +74,8 @@ private fun MeshApp() {
     var connectionName by remember { mutableStateOf<String?>(null) }
     var status by remember { mutableStateOf("Bluetooth bağlantısı henüz kurulmadı.") }
     var activePeer by remember { mutableStateOf<BluetoothChatManager.Peer?>(null) }
+    var pendingContact by remember { mutableStateOf<ContactQr.Contact?>(null) }
+    var secureChannelActive by remember { mutableStateOf(false) }
     val messages = remember { mutableStateListOf<BluetoothChatManager.ChatMessage>() }
 
     DisposableEffect(manager) {
@@ -81,6 +87,8 @@ private fun MeshApp() {
             override fun onConnectionChanged(connectedName: String?) { connectionName = connectedName }
             override fun onMessage(message: BluetoothChatManager.ChatMessage) { messages.add(message) }
             override fun onStatus(value: String) { status = value }
+            override fun onPeerIdentityPending(contact: ContactQr.Contact) { pendingContact = contact }
+            override fun onSecurityChanged(verified: Boolean, fingerprint: String?) { secureChannelActive = verified }
         }
         manager.addListener(listener)
         onDispose {
@@ -131,7 +139,12 @@ private fun MeshApp() {
                             if (peer.bonded) manager.connect(peer.device) else manager.pair(peer.device)
                         }
                     )
-                    else -> SecurityScreen(connectionName)
+                    else -> SecurityScreen(
+                        connectionName = connectionName,
+                        pendingContact = pendingContact,
+                        secureChannelActive = secureChannelActive,
+                        onContactSaved = { manager.refreshTrust() }
+                    )
                 }
             }
         }
@@ -235,30 +248,19 @@ private fun DevicesScreen(
 }
 
 @Composable
-private fun SecurityScreen(connectionName: String?) {
+private fun SecurityScreen(
+    connectionName: String?,
+    pendingContact: ContactQr.Contact?,
+    secureChannelActive: Boolean,
+    onContactSaved: () -> Unit
+) {
     val context = androidx.compose.ui.platform.LocalContext.current
-    val activity = context as? Activity
-    val identity = remember { SecureChannel.newIdentityKeyPair() }
-    val store = remember { TrustedContactStore(context) }
-    var contacts by remember { mutableStateOf(store.all()) }
-    var pendingContact by remember { mutableStateOf<ContactQr.Contact?>(null) }
-    var scanStatus by remember { mutableStateOf("Kişi eklemek için karşı tarafın QR kodunu tara.") }
-    val scanner = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
-        val parsed = IntentIntegrator.parseActivityResult(IntentIntegrator.REQUEST_CODE, result.resultCode, result.data)
-        val raw = parsed?.contents
-        if (raw.isNullOrBlank()) {
-            scanStatus = "QR taraması iptal edildi veya sonuç alınamadı."
-        } else {
-            try {
-                pendingContact = ContactQr.decode(raw)
-                scanStatus = "QR yapısı ve anahtar parmak izi kontrol edildi. Kaydetmeden önce karşı tarafla parmak izini yüz yüze karşılaştır."
-            } catch (error: Exception) {
-                scanStatus = "Geçersiz Nexora Mesh QR kodu: ${error.message ?: "okunamadı"}"
-                pendingContact = null
-            }
-        }
-    }
-    val qrBitmap = remember(identity) {
+    val identity = remember { IdentityStore(context).loadOrCreate() }
+    val contactStore = remember { TrustedContactStore(context) }
+    var savedContacts by remember { mutableStateOf(contactStore.all()) }
+    var candidate by remember { mutableStateOf<ContactQr.Contact?>(null) }
+    var scanStatus by remember { mutableStateOf("Güvenilir kişi eklemek için diğer kişinin QR kodunu tara.") }
+    val qrBitmap = remember(identity.fingerprint) {
         val payload = ContactQr.encode(identity.publicKeyBase64)
         val matrix = MultiFormatWriter().encode(payload, BarcodeFormat.QR_CODE, 640, 640)
         Bitmap.createBitmap(640, 640, Bitmap.Config.ARGB_8888).also { bitmap ->
@@ -267,62 +269,121 @@ private fun SecurityScreen(connectionName: String?) {
             }
         }
     }
-    Column(Modifier.fillMaxSize().padding(22.dp).verticalScroll(androidx.compose.foundation.rememberScrollState()), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-        Text("Güvenlik ve kimlik", color = Color.White, fontSize = 27.sp, fontWeight = FontWeight.Bold)
-        InfoCard("Kişi ekleme QR'sı", "Bu QR, bu uygulama oturumunun açık anahtarını taşır. Kimlik anahtarı henüz uygulama yeniden başlatmaları arasında kalıcı değildir.")
-        Image(bitmap = qrBitmap.asImageBitmap(), contentDescription = "Nexora Mesh açık anahtar QR kodu", modifier = Modifier.size(220.dp).align(Alignment.CenterHorizontally))
-        Text("Bu cihazın parmak izi", color = MeshGreen, fontWeight = FontWeight.Bold)
-        Text(identity.fingerprint, color = Color.White, fontSize = 11.sp)
-        Button(
-            onClick = {
-                val host = activity
-                if (host == null) scanStatus = "QR tarayıcı bu ekrandan açılamıyor."
-                else scanner.launch(IntentIntegrator(host).setDesiredBarcodeFormats(listOf(IntentIntegrator.QR_CODE)).setPrompt("Nexora Mesh kişi QR kodunu tara").setBeepEnabled(false).setOrientationLocked(false).createScanIntent())
-            },
-            modifier = Modifier.fillMaxWidth()
-        ) { Text("QR tara ve kişiyi doğrula") }
-        Text(scanStatus, color = MeshMuted, fontSize = 12.sp)
-        if (contacts.isEmpty()) {
-            InfoCard("Güvenilir kişiler", "Henüz kaydedilmiş kişi yok.")
+    val scanOptions = remember {
+        ScanOptions().setDesiredBarcodeFormats(ScanOptions.QR_CODE)
+            .setPrompt("Nexora Mesh kişi QR kodunu tara")
+            .setBeepEnabled(false)
+            .setOrientationLocked(false)
+    }
+    val scanLauncher = rememberLauncherForActivityResult(ScanContract()) { result ->
+        val raw = result.contents
+        if (raw.isNullOrBlank()) {
+            scanStatus = "QR taraması iptal edildi."
         } else {
-            Text("Güvenilir kişiler (${contacts.size})", color = MeshGreen, fontWeight = FontWeight.Bold)
-            contacts.forEach { contact ->
-                Column(Modifier.fillMaxWidth().background(MeshSurface, RoundedCornerShape(14.dp)).padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Text(contact.label, color = Color.White, fontWeight = FontWeight.SemiBold)
-                    Text(contact.fingerprint, color = MeshMuted, fontSize = 10.sp)
-                    TextButton(onClick = { store.remove(contact.fingerprint); contacts = store.all() }) { Text("Kişiyi sil") }
-                }
+            try {
+                candidate = ContactQr.decode(raw)
+                scanStatus = "QR biçimi ve açık anahtar parmak izi doğrulandı. Kişiyi kaydetmeden önce karşılaştır."
+            } catch (_: Exception) {
+                candidate = null
+                scanStatus = "QR geçersiz veya parmak izi tutarsız. Kişi kaydedilmedi."
             }
         }
-        InfoCard("Bağlantı durumu", connectionName ?: "Şu anda bağlı cihaz yok.")
-        InfoCard("Şifreleme durumu", "QR tarama ve yerel kişi kaydı eklendi. Ancak bu sürümde kaydedilmiş parmak izi Bluetooth el sıkışmasına zorunlu bağlanmadı; mesajlar hâlâ uygulama düzeyinde E2EE ile korunmuyor.")
-        InfoCard("Platform ve aktarım", "Relay, medya aktarımı ve iOS/Android yerel radyo taşıması ayrı entegrasyon ve gerçek cihaz testleri gerektiriyor.")
-        InfoCard("Güvenlik uyarısı", "Kişiyi kaydetmeden önce parmak izini karşı tarafla güvenli, ayrı bir kanaldan karşılaştır. Deneysel prototipi acil durum iletişimi için tek başına kullanma.")
     }
-    pendingContact?.let { contact ->
-        AlertDialog(
-            onDismissRequest = { pendingContact = null },
-            title = { Text("Kişi parmak izini doğrula") },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("Ad: ${contact.label}")
-                    Text(contact.fingerprint, fontSize = 12.sp)
-                    Text("Bu parmak izini karşı tarafın ekranındaki değerle yüz yüze veya başka güvenli bir kanaldan karşılaştır. Eşleşmiyorsa kaydetme.")
-                }
-            },
-            confirmButton = {
-                TextButton(onClick = {
+    val cameraPermissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        if (granted) scanLauncher.launch(scanOptions)
+        else scanStatus = "QR taramak için kamera izni gerekiyor."
+    }
+    fun beginScan() {
+        if (ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) {
+            scanLauncher.launch(scanOptions)
+        } else {
+            cameraPermissionLauncher.launch(Manifest.permission.CAMERA)
+        }
+    }
+
+    Column(
+        Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(22.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp)
+    ) {
+        Text("Güvenlik ve kimlik", color = Color.White, fontSize = 27.sp, fontWeight = FontWeight.Bold)
+        InfoCard(
+            "Bu cihazın kalıcı kimliği",
+            "Açık anahtar Android Keystore ile korunan cihaz kimliğine bağlıdır. Özel anahtar, Android Keystore AES-GCM anahtarıyla şifrelenerek yerel depoda tutulur."
+        )
+        Image(
+            bitmap = qrBitmap.asImageBitmap(),
+            contentDescription = "Nexora Mesh açık anahtar QR kodu",
+            modifier = Modifier.size(220.dp).align(Alignment.CenterHorizontally)
+        )
+        Text("Bu cihazın parmak izi", color = MeshGreen, fontWeight = FontWeight.Bold)
+        Text(identity.fingerprint, color = Color.White, fontSize = 11.sp)
+        Button(onClick = ::beginScan, modifier = Modifier.fillMaxWidth()) {
+            Text("Güvenilir kişi QR kodunu tara")
+        }
+        Text(scanStatus, color = MeshMuted, fontSize = 12.sp)
+        candidate?.let { scanned ->
+            InfoCard("Taranan kişi", scanned.label + "\nParmak izi: " + scanned.fingerprint)
+            Text(
+                "Bu parmak izini diğer kişinin cihazında gösterilen değerle karşılaştır. Yalnızca eşleşiyorsa kaydet.",
+                color = MeshMuted,
+                fontSize = 12.sp
+            )
+            Button(
+                onClick = {
                     try {
-                        store.save(contact)
-                        contacts = store.all()
-                        scanStatus = "Kişi yerel olarak kaydedildi. Bu kayıt henüz Bluetooth şifreleme el sıkışmasını etkinleştirmez."
-                    } catch (error: Exception) {
-                        scanStatus = "Kişi kaydedilemedi: ${error.message ?: "bilinmeyen hata"}"
+                        contactStore.save(scanned)
+                        savedContacts = contactStore.all()
+                        candidate = null
+                        scanStatus = "QR doğrulanmış kişi güvenilir kişi listesine kaydedildi."
+                        onContactSaved()
+                    } catch (_: Exception) {
+                        scanStatus = "Kişi kaydedilemedi; QR verisini tekrar kontrol et."
                     }
-                    pendingContact = null
-                }) { Text("Karşılaştırdım, kaydet") }
-            },
-            dismissButton = { TextButton(onClick = { pendingContact = null }) { Text("İptal") } }
+                },
+                modifier = Modifier.fillMaxWidth()
+            ) { Text("Parmak izini kontrol ettim — kişiyi kaydet") }
+            OutlinedButton(onClick = { candidate = null }, modifier = Modifier.fillMaxWidth()) {
+                Text("İptal")
+            }
+        }
+        pendingContact?.let { pending ->
+            InfoCard(
+                "Bluetooth karşı tarafı doğrulanmayı bekliyor",
+                pending.label + "\nParmak izi: " + pending.fingerprint +
+                    "\nBu cihazın parmak izini karşı tarafla QR üzerinden karşılaştırıp onun QR kodunu da bu cihaza kaydet."
+            )
+        }
+        InfoCard(
+            "Canlı bağlantı güvenliği",
+            if (secureChannelActive) {
+                "QR'da kaydedilmiş açık anahtar eşleşti. ECDH + AES-GCM ile şifreli mesaj kanalı etkin."
+            } else {
+                "Şifreli mesaj gönderimi kapalı. Karşı tarafın QR kimliği bu cihazdaki güvenilir kişiler listesiyle eşleşmeden mesaj gönderilmez."
+            }
+        )
+        InfoCard(
+            "Güvenilir kişiler (" + savedContacts.size + ")",
+            if (savedContacts.isEmpty()) "Henüz güvenilir kişi kaydedilmedi."
+            else savedContacts.joinToString("\n\n") { it.label + "\n" + it.fingerprint }
+        )
+        if (savedContacts.isNotEmpty()) {
+            OutlinedButton(
+                onClick = {
+                    savedContacts.firstOrNull()?.let { contactStore.remove(it.fingerprint) }
+                    savedContacts = contactStore.all()
+                    onContactSaved()
+                },
+                modifier = Modifier.fillMaxWidth()
+            ) { Text("Listeden ilk kişiyi kaldır") }
+        }
+        InfoCard("Bağlantı durumu", connectionName ?: "Şu anda bağlı cihaz yok.")
+        InfoCard(
+            "Henüz tamamlanmayanlar",
+            "Bu değişiklik QR tarama/kayıt ve doğrudan Bluetooth metninde E2EE el sıkışmasını bağlar. Üç cihazlı A→B→C röle, dosya/medya aktarımı ve iPhone–Android radyo taşıması ayrı entegrasyon ve fiziksel cihaz testleri gerektirir."
+        )
+        InfoCard(
+            "Acil durum uyarısı",
+            "Deneysel prototiptir; afet veya acil durumlarda güvenilir bir iletişim aracı olarak kullanma. Gerçek cihaz testleri ve bağımsız güvenlik incelemesi gerekiyor."
         )
     }
 }
