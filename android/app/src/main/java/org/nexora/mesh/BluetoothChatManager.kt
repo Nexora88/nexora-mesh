@@ -317,7 +317,10 @@ class BluetoothChatManager(context: Context) {
                 .put("id", messageId)
                 .put("n", Base64.encodeToString(sealed.nonce, Base64.NO_WRAP))
                 .put("c", Base64.encodeToString(sealed.ciphertext, Base64.NO_WRAP))
-            enqueuePending(messageId, frame)
+            if (!enqueuePending(messageId, frame)) {
+                status("Çevrimdışı kuyruk dolu veya kalıcı kaydedilemedi; mesaj gönderilmedi.")
+                return false
+            }
             val sent = sendWire(frame)
             mainHandler.post { listeners.forEach { it.onMessage(ChatMessage(text.trim(), true)) } }
             if (!sent) status("Mesaj şifrelenip çevrimdışı kuyruğa kaydedildi; teslim onayı bekleniyor.")
@@ -593,15 +596,19 @@ class BluetoothChatManager(context: Context) {
         true
     }
 
-    private fun persistPendingLocked() {
+    private fun persistPendingLocked(): Boolean {
         val array = org.json.JSONArray()
         pendingMessages.forEach { (id, frame) -> array.put(JSONObject().put("id", id).put("frame", frame)) }
-        deliveryPrefs.edit().putString("pending", array.toString()).commit()
+        return deliveryPrefs.edit().putString("pending", array.toString()).commit()
     }
 
-    private fun enqueuePending(id: String, frame: JSONObject) = synchronized(pendingLock) {
+    private fun enqueuePending(id: String, frame: JSONObject): Boolean = synchronized(pendingLock) {
+        if (!pendingMessages.containsKey(id) && pendingMessages.size >= MAX_PENDING_MESSAGES) return@synchronized false
         pendingMessages[id] = frame.toString()
-        persistPendingLocked()
+        if (persistPendingLocked()) true else {
+            pendingMessages.remove(id)
+            false
+        }
     }
 
     private fun acknowledgePending(id: String) {
@@ -718,6 +725,7 @@ class BluetoothChatManager(context: Context) {
     companion object {
         private fun dataAad(messageId: String) = "NexoraMesh/data/v1:$messageId".toByteArray(StandardCharsets.UTF_8)
         private const val MAX_REPLAY_IDS = 4096
+        private const val MAX_PENDING_MESSAGES = 1000
         private const val MAX_DELIVERY_RETRIES = 8
         private const val DELIVERY_RETRY_DELAY_MS = 2_000L
         private val CONTROL_AAD = "NexoraMesh/control/v1".toByteArray(StandardCharsets.UTF_8)
