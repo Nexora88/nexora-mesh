@@ -54,9 +54,22 @@ class BluetoothChatManager(context: Context) {
     private val identity = IdentityStore(appContext).loadOrCreate()
     private val trustedContacts = TrustedContactStore(appContext)
     private val wireLock = Any()
-    private val replayLock = Any()
-    private val receivedMessageIds = LinkedHashSet<String>()
     private val deliveryPrefs = appContext.getSharedPreferences("mesh_delivery_v1", Context.MODE_PRIVATE)
+    private val replayWindow = ReplayWindow(
+        initial = run {
+            val stored = deliveryPrefs.getString("received_ids", null)
+            if (stored.isNullOrBlank()) emptyList() else try {
+                val array = org.json.JSONArray(stored)
+                (0 until array.length()).map { array.getString(it) }
+            } catch (_: Exception) { emptyList() }
+        },
+        maxSize = MAX_REPLAY_IDS,
+        persist = { ids ->
+            val array = org.json.JSONArray()
+            ids.forEach { array.put(it) }
+            deliveryPrefs.edit().putString("received_ids", array.toString()).commit()
+        }
+    )
     private val pendingLock = Any()
     private val retryAttempts = ConcurrentHashMap<String, Int>()
     private val pendingMessages = PendingDeliveryQueue(
@@ -278,7 +291,7 @@ class BluetoothChatManager(context: Context) {
         localProofAcked = false
         remoteIdentity = null
         remoteFingerprint = null
-        synchronized(replayLock) { receivedMessageIds.clear() }
+        // Preserve replay history across reconnects to prevent duplicate delivery.
         mediaReassemblers.clear()
         mediaNames.clear()
         running.set(true)
@@ -589,23 +602,7 @@ class BluetoothChatManager(context: Context) {
         }
     }
 
-    private fun rememberIncomingMessageId(id: String): Boolean = synchronized(replayLock) {
-        val stored = deliveryPrefs.getString("received_ids", null)
-        if (receivedMessageIds.isEmpty() && !stored.isNullOrBlank()) try {
-            val array = org.json.JSONArray(stored)
-            for (i in 0 until array.length()) receivedMessageIds.add(array.getString(i))
-        } catch (_: Exception) { receivedMessageIds.clear() }
-        if (receivedMessageIds.contains(id)) return@synchronized false
-        receivedMessageIds.add(id)
-        while (receivedMessageIds.size > MAX_REPLAY_IDS) {
-            val oldest = receivedMessageIds.iterator().next()
-            receivedMessageIds.remove(oldest)
-        }
-        val array = org.json.JSONArray()
-        receivedMessageIds.forEach { array.put(it) }
-        deliveryPrefs.edit().putString("received_ids", array.toString()).commit()
-        true
-    }
+    private fun rememberIncomingMessageId(id: String): Boolean = replayWindow.remember(id)
 
     private fun enqueuePending(id: String, frame: JSONObject): Boolean =
         synchronized(pendingLock) { pendingMessages.enqueue(id, frame.toString()) }
@@ -712,7 +709,7 @@ class BluetoothChatManager(context: Context) {
         localProofAcked = false
         remoteIdentity = null
         remoteFingerprint = null
-        synchronized(replayLock) { receivedMessageIds.clear() }
+        // Preserve replay history across reconnects to prevent duplicate delivery.
         mediaReassemblers.clear()
         mediaNames.clear()
         mainHandler.post { listeners.forEach { it.onConnectionChanged(null); it.onSecurityChanged(false, null) } }
