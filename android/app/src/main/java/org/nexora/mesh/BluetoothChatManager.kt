@@ -273,8 +273,18 @@ class BluetoothChatManager(context: Context) {
             status("Henüz karşı tarafın Bluetooth kimliği alınmadı.")
             return
         }
-        if (activateIfTrusted(remote)) status("Parmak izi eşleşti. Uçtan uca şifreli kanal etkin.")
-        else status("Güvenli kanal kapalı: karşı tarafın QR kodunu tara ve parmak izini doğrula.")
+        if (activateIfTrusted(remote)) {
+            if (secureChannel != null) status("Karşı taraf doğrulanmış ve şifreli kanal etkin.")
+            else status("Parmak izi eşleşti; kriptografik anahtar sahipliği el sıkışması bekleniyor.")
+        } else {
+            secureChannel = null
+            candidateChannel = null
+            localProofNonce = null
+            remoteProofReceived = false
+            localProofAcked = false
+            mainHandler.post { listeners.forEach { it.onSecurityChanged(false, remote.fingerprint) } }
+            status("Güvenli kanal kapalı: karşı tarafın QR kodunu tara ve parmak izini doğrula.")
+        }
     }
 
     fun isEndToEndEncrypted(): Boolean = secureChannel != null
