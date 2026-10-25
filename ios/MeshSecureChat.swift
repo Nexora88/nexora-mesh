@@ -193,7 +193,7 @@ final class MeshSecureChat: ObservableObject {
                       let nonce = Data(base64Encoded: nonceText),
                       let ciphertext = Data(base64Encoded: cipherText) else { throw MeshSecureChatError.invalidProof }
                 let plaintext = try Self.open(nonce: nonce, ciphertext: ciphertext, key: key,
-                                              aad: Data("NexoraMesh/data/v1:\\(id)".utf8))
+                                              aad: Data("NexoraMesh/data/v1:\(id)".utf8))
                 var received = defaults.stringArray(forKey: receivedKey) ?? []
                 let isNew = !received.contains(id)
                 if isNew {
