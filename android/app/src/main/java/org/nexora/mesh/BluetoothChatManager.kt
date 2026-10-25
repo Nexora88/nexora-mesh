@@ -273,7 +273,7 @@ class BluetoothChatManager(context: Context) {
             status("Henüz karşı tarafın Bluetooth kimliği alınmadı.")
             return
         }
-        if (activateIfTrusted(remote)) {
+        if (activateIfTrusted(remote, forceRestart = true)) {
             if (secureChannel != null) status("Karşı taraf doğrulanmış ve şifreli kanal etkin.")
             else status("Parmak izi eşleşti; kriptografik anahtar sahipliği el sıkışması bekleniyor.")
         } else {
@@ -368,7 +368,7 @@ class BluetoothChatManager(context: Context) {
         }
     }
 
-    private fun activateIfTrusted(contact: ContactQr.Contact): Boolean {
+    private fun activateIfTrusted(contact: ContactQr.Contact, forceRestart: Boolean = false): Boolean {
         val trusted = trustedContacts.all().firstOrNull {
             it.fingerprint.equals(contact.fingerprint, ignoreCase = true)
         } ?: return false
@@ -376,7 +376,7 @@ class BluetoothChatManager(context: Context) {
         val remoteBytes = Base64.decode(contact.publicKeyBase64, Base64.DEFAULT)
         if (!MessageDigest.isEqual(storedBytes, remoteBytes)) return false
         return try {
-            if (candidateChannel != null && remoteFingerprint == contact.fingerprint) return true
+            if (!forceRestart && candidateChannel != null && remoteFingerprint == contact.fingerprint) return true
             val channel = SecureChannel.derive(identity, SecureChannel.decodePublicKey(contact.publicKeyBase64))
             candidateChannel = channel
             secureChannel = null
