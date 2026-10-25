@@ -1,0 +1,9 @@
+[package]
+name = "mesh-core"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "Transport-independent protocol primitives for Nexora Mesh"
+
+[lib]
+path = "src/lib.rs"
