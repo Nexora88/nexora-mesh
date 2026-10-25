@@ -94,3 +94,4 @@ class PendingDeliveryQueueTest {
         assertEquals(mapOf("id-1" to "frame-1"), queue.snapshot())
         assertEquals(mapOf("id-1" to "frame-1"), durable)
     }
+}
