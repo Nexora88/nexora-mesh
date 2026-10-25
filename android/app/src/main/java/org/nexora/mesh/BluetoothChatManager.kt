@@ -23,6 +23,7 @@ import java.util.concurrent.ConcurrentHashMap
 import android.util.Base64
 import org.json.JSONObject
 import java.security.MessageDigest
+import java.security.SecureRandom
 import androidx.core.content.ContextCompat
 import java.io.BufferedReader
 import java.io.InputStreamReader
@@ -57,6 +58,10 @@ class BluetoothChatManager(context: Context) {
     private val trustedContacts = TrustedContactStore(appContext)
     private val wireLock = Any()
     @Volatile private var secureChannel: SecureChannel? = null
+    @Volatile private var candidateChannel: SecureChannel? = null
+    @Volatile private var localProofNonce: String? = null
+    @Volatile private var remoteProofReceived = false
+    @Volatile private var localProofAcked = false
     @Volatile private var remoteIdentity: ContactQr.Contact? = null
     @Volatile private var remoteFingerprint: String? = null
     private val mediaReassemblers = ConcurrentHashMap<String, MediaTransferProtocol.Reassembler>()
@@ -216,6 +221,10 @@ class BluetoothChatManager(context: Context) {
         socket = newSocket
         connectedName = try { newSocket.remoteDevice.name ?: "Eşleştirilmiş cihaz" } catch (_: Exception) { "Eşleştirilmiş cihaz" }
         secureChannel = null
+        candidateChannel = null
+        localProofNonce = null
+        remoteProofReceived = false
+        localProofAcked = false
         remoteIdentity = null
         remoteFingerprint = null
         running.set(true)
@@ -304,6 +313,29 @@ class BluetoothChatManager(context: Context) {
                         }
                     }
                 }
+                "PROOF" -> {
+                    val channel = candidateChannel ?: secureChannel ?: throw SecurityException("No candidate session key")
+                    val nonce = Base64.decode(frame.getString("n"), Base64.DEFAULT)
+                    val ciphertext = Base64.decode(frame.getString("c"), Base64.DEFAULT)
+                    val control = JSONObject(channel.decrypt(SecureChannel.Sealed(nonce, ciphertext), CONTROL_AAD).toString(StandardCharsets.UTF_8))
+                    require(control.getString("type") == "PROOF")
+                    val peerNonce = control.getString("nonce")
+                    require(Base64.decode(peerNonce, Base64.DEFAULT).size == 32)
+                    remoteProofReceived = true
+                    val ack = JSONObject().put("type", "PROOF_ACK").put("nonce", peerNonce).toString().toByteArray(StandardCharsets.UTF_8)
+                    sendEncryptedControl("PROOF_ACK", ack, channel)
+                    maybeActivateSecureChannel()
+                }
+                "PROOF_ACK" -> {
+                    val channel = candidateChannel ?: secureChannel ?: throw SecurityException("No candidate session key")
+                    val nonce = Base64.decode(frame.getString("n"), Base64.DEFAULT)
+                    val ciphertext = Base64.decode(frame.getString("c"), Base64.DEFAULT)
+                    val control = JSONObject(channel.decrypt(SecureChannel.Sealed(nonce, ciphertext), CONTROL_AAD).toString(StandardCharsets.UTF_8))
+                    require(control.getString("type") == "PROOF_ACK")
+                    require(control.getString("nonce") == localProofNonce) { "Proof acknowledgement does not match this session" }
+                    localProofAcked = true
+                    maybeActivateSecureChannel()
+                }
                 "DATA" -> {
                     val channel = secureChannel ?: throw SecurityException("Unverified peer sent data")
                     val nonce = Base64.decode(frame.getString("n"), Base64.DEFAULT)
@@ -334,15 +366,28 @@ class BluetoothChatManager(context: Context) {
         val remoteBytes = Base64.decode(contact.publicKeyBase64, Base64.DEFAULT)
         if (!MessageDigest.isEqual(storedBytes, remoteBytes)) return false
         return try {
+            if (candidateChannel != null && remoteFingerprint == contact.fingerprint) return true
             val channel = SecureChannel.derive(identity, SecureChannel.decodePublicKey(contact.publicKeyBase64))
-            secureChannel = channel
+            candidateChannel = channel
+            secureChannel = null
             remoteFingerprint = contact.fingerprint
+            remoteProofReceived = false
+            localProofAcked = false
+            localProofNonce = Base64.encodeToString(ByteArray(32).also { SecureRandom().nextBytes(it) }, Base64.NO_WRAP)
+            val proof = JSONObject().put("type", "PROOF").put("nonce", localProofNonce)
+                .toString().toByteArray(StandardCharsets.UTF_8)
+            if (!sendEncryptedControl("PROOF", proof, channel)) {
+                candidateChannel = null
+                localProofNonce = null
+                return false
+            }
             mainHandler.post {
-                listeners.forEach { it.onSecurityChanged(true, contact.fingerprint) }
-                status("QR parmak izi doğrulandı; ECDH + AES-GCM uçtan uca şifreli kanal etkin.")
+                listeners.forEach { it.onSecurityChanged(false, contact.fingerprint) }
+                status("QR parmak izi eşleşti; karşı tarafın anahtar sahipliği şifreli el sıkışmasıyla doğrulanıyor.")
             }
             true
         } catch (_: Exception) {
+            candidateChannel = null
             secureChannel = null
             false
         }
@@ -416,6 +461,28 @@ class BluetoothChatManager(context: Context) {
         }
     }
 
+    private fun sendEncryptedControl(type: String, plaintext: ByteArray, channel: SecureChannel): Boolean {
+        return try {
+            val sealed = channel.encrypt(plaintext, CONTROL_AAD)
+            sendWire(JSONObject()
+                .put("t", type)
+                .put("n", Base64.encodeToString(sealed.nonce, Base64.NO_WRAP))
+                .put("c", Base64.encodeToString(sealed.ciphertext, Base64.NO_WRAP)))
+        } catch (_: Exception) { false }
+    }
+
+    @Synchronized
+    private fun maybeActivateSecureChannel() {
+        val candidate = candidateChannel ?: return
+        if (!remoteProofReceived || !localProofAcked) return
+        secureChannel = candidate
+        val fingerprint = remoteFingerprint
+        mainHandler.post {
+            listeners.forEach { it.onSecurityChanged(true, fingerprint) }
+            status("Anahtar sahipliği doğrulandı; ECDH + AES-GCM uçtan uca şifreli kanal etkin.")
+        }
+    }
+
     private fun sendWire(frame: JSONObject): Boolean {
         val current = socket ?: return false
         return try {
@@ -444,6 +511,10 @@ class BluetoothChatManager(context: Context) {
         serverSocket = null
         connectedName = null
         secureChannel = null
+        candidateChannel = null
+        localProofNonce = null
+        remoteProofReceived = false
+        localProofAcked = false
         remoteIdentity = null
         remoteFingerprint = null
         mediaReassemblers.clear()
@@ -466,6 +537,7 @@ class BluetoothChatManager(context: Context) {
 
     companion object {
         private val DATA_AAD = "NexoraMesh/data/v1".toByteArray(StandardCharsets.UTF_8)
+        private val CONTROL_AAD = "NexoraMesh/control/v1".toByteArray(StandardCharsets.UTF_8)
         private val MEDIA_AAD = "NexoraMesh/media/v1".toByteArray(StandardCharsets.UTF_8)
         val SERVICE_UUID: UUID = UUID.fromString("0c4e6c7a-3b12-4b8d-a920-5f0c1a2d7e31")
     }
