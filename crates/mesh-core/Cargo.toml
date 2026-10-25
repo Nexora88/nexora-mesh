@@ -3,7 +3,8 @@ name = "mesh-core"
 version = "0.1.0"
 edition = "2021"
 license = "MIT"
-description = "Transport-independent protocol primitives, relay queue and power policy for Nexora Mesh"
+description = "Transport-independent protocol primitives, relay queue, ephemeral IDs and power policy for Nexora Mesh"
 
 [lib]
 path = "src/lib.rs"
+crate-type = ["rlib", "cdylib", "staticlib"]
