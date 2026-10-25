@@ -1,6 +1,7 @@
 import SwiftUI
 import CoreImage.CIFilterBuiltins
 import UIKit
+import VisionKit
 
 private enum MeshPalette {
     static let background = Color(red: 7 / 255, green: 17 / 255, blue: 15 / 255)
@@ -47,6 +48,7 @@ struct MeshRootView: View {
     @State private var selectedChat: ChatItem?
     @State private var qrPayloadInput = ""
     @State private var qrTrustStatus = ""
+    @State private var showQRScanner = false
 
     private let chats = [
         ChatItem(title: "Yerel notlar", detail: "Nexora Mesh'e hoş geldin", initials: "NM"),
@@ -70,6 +72,18 @@ struct MeshRootView: View {
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     bottomBar
+                }
+            }
+        }
+        .sheet(isPresented: $showQRScanner) {
+            QRScannerView { payload in
+                qrPayloadInput = payload
+                showQRScanner = false
+                do {
+                    try secureChat.trustQRPayload(payload)
+                    qrTrustStatus = secureChat.status
+                } catch {
+                    qrTrustStatus = "QR reddedildi: biçim veya parmak izi doğrulanamadı."
                 }
             }
         }
@@ -207,6 +221,19 @@ struct MeshRootView: View {
                         UIPasteboard.general.string = payload
                     }.buttonStyle(.borderedProminent).tint(MeshPalette.green).foregroundStyle(MeshPalette.background)
                 }
+                Button {
+                    guard DataScannerViewController.isSupported, DataScannerViewController.isAvailable else {
+                        qrTrustStatus = "Bu cihazda canlı QR tarama kullanılamıyor; QR içeriğini yapıştırabilirsin."
+                        return
+                    }
+                    showQRScanner = true
+                } label: {
+                    Label("QR kodunu kamerayla tara", systemImage: "qrcode.viewfinder")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(MeshPalette.green)
+                .foregroundStyle(MeshPalette.background)
                 TextField("NEXORAMESH: QR içeriğini yapıştır", text: $qrPayloadInput, axis: .vertical)
                     .textFieldStyle(.roundedBorder)
                 Button("QR kimliğini doğrula ve kaydet") {
@@ -378,5 +405,48 @@ private struct QRCodeView: View {
         let transform = CGAffineTransform(scaleX: 4, y: 4)
         guard let cgImage = context.createCGImage(output.transformed(by: transform), from: output.extent.applying(transform)) else { return nil }
         return UIImage(cgImage: cgImage)
+    }
+}
+
+
+private struct QRScannerView: UIViewControllerRepresentable {
+    let onRecognized: (String) -> Void
+
+    func makeCoordinator() -> Coordinator { Coordinator(onRecognized: onRecognized) }
+
+    func makeUIViewController(context: Context) -> DataScannerViewController {
+        let scanner = DataScannerViewController(
+            recognizedDataTypes: [.barcode(symbologies: [.qr])],
+            qualityLevel: .balanced,
+            recognizesMultipleItems: false,
+            isHighFrameRateTrackingEnabled: false,
+            isPinchToZoomEnabled: true,
+            isGuidanceEnabled: true,
+            isHighlightingEnabled: true
+        )
+        scanner.delegate = context.coordinator
+        do { try scanner.startScanning() } catch { }
+        return scanner
+    }
+
+    func updateUIViewController(_ uiViewController: DataScannerViewController, context: Context) {}
+
+    final class Coordinator: NSObject, DataScannerViewControllerDelegate {
+        private let onRecognized: (String) -> Void
+        private var didReturn = false
+
+        init(onRecognized: @escaping (String) -> Void) { self.onRecognized = onRecognized }
+
+        func dataScanner(_ dataScanner: DataScannerViewController, didAdd addedItems: [RecognizedItem], allItems: [RecognizedItem]) {
+            guard !didReturn else { return }
+            for item in addedItems {
+                if case .barcode(let barcode) = item, let value = barcode.payloadStringValue,
+                   value.hasPrefix("NEXORAMESH:") {
+                    didReturn = true
+                    onRecognized(value)
+                    return
+                }
+            }
+        }
     }
 }
