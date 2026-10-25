@@ -2,7 +2,7 @@
 
 **Android ve Apple platformları için internet olmadan yakındaki cihazlarla iletişim kurmayı hedefleyen, afet dayanıklılığı odaklı bir mesajlaşma projesi.** Hedefimiz; orman yangını, deprem, sel ve dağ arama-kurtarma gibi bağlantının kesilebildiği koşullarda da işe yarayabilecek güvenilir bir iletişim markası oluşturmaktır.
 
-> **Dürüst durum notu:** Android tarafında Bluetooth Classic RFCOMM doğrudan sohbet prototipi, QR/kişi güven akışı ve ECDH/AES-GCM ile dosya parçalama yapı taşları bulunuyor; bunlar bağımsız güvenlik denetiminden ve gerçek cihaz doğrulamasından geçmiş üretim protokolü değildir. Rust tarafına beş atlamalı zarf biçimi ve C ABI doğrulama/iletme giriş noktaları eklendi. Ancak C ABI henüz Android JNI veya iOS XCFramework olarak paketlenmedi; Android BLE GATT ve iOS CoreBluetooth radyo taşıması uygulanmadı. Gerçek üç cihaz A→B→C ve Android–iPhone testleri yapılmadı. Sesli/görüntülü arama ve özel codec yoktur. Acil durumlarda kullanıma hazır değildir.
+> **Dürüst durum notu:** Android Bluetooth Classic sohbeti mevcut. Rust C ABI için Android JNI/CMake köprüsü, Android BLE GATT keşif/bağlantı prototipi, iOS CoreBluetooth GATT kaynak kodu, Swift C ABI sarmalayıcısı ve iOS XCFramework derleme betiği eklendi. Ancak BLE taşıması mevcut sohbetin QR doğrulamalı şifreli mesaj protokolüne henüz uçtan uca bağlanmadı; CI derlemeleri devam ediyor ve iOS/Xcode derlemesi doğrulanmadı. Gerçek üç cihaz A→B→C ve Android–iPhone testleri yapılmadı. Sesli/görüntülü arama ve özel codec yoktur. Acil durumlarda kullanıma hazır değildir.
 
 ## Güvenilir kişiler ve QR tarama durumu
 
@@ -16,7 +16,7 @@ Güvenlik sekmesinde cihaz kimliği kalıcıdır: özel anahtar, Android Keystor
 
 Bu, bağımsız güvenlik denetimi yapılmış bir mesajlaşma sistemi değildir. CI derlemesi fiziksel cihazda radyo bağlantısını kanıtlamaz. Şifreli kanalın üretim güvenliği ve protokol bağlaması ayrıca doğrulanmalıdır. Test adımları: [Android Bluetooth, E2EE ve medya test rehberi](docs/ANDROID_BLUETOOTH_TEST.md). APK indirme: [Android APK rehberi](docs/ANDROID_INSTALL.md).
 
-**Sınırlar:** Aynı anda tek doğrudan Bluetooth Classic bağlantısı vardır. A→B→C gerçek çok atlamalı aktarım henüz Android taşımasına bağlı değildir. Dosya aktarımında devam ettirme ve teslim onayı yoktur. iOS CoreBluetooth/Android BLE ortak taşıması ve iPhone–Android fiziksel testi tamamlanmamıştır. Sesli/görüntülü arama, kalıcı sohbet geçmişi ve bağımsız güvenlik incelemesi yoktur.
+**Sınırlar:** Mevcut sohbet Bluetooth Classic RFCOMM kullanır; BLE GATT kodu ayrı bir taşıma prototipidir ve mevcut E2EE sohbet akışıyla bütünleşmesi tamamlanmamıştır. Rust JNI köprüsünün Android CI derlemesi bekleniyor; iOS XCFramework betiği henüz macOS/Xcode ortamında doğrulanmadı. A→B→C gerçek çok atlamalı aktarım, Android–iPhone fiziksel testi, dosyanın BLE/relay üzerinden uçtan uca aktarımı, sesli/görüntülü arama, kalıcı sohbet geçmişi ve bağımsız güvenlik incelemesi tamamlanmamıştır.
 
 ## Vizyon
 
