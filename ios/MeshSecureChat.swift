@@ -394,7 +394,6 @@ final class MeshSecureChat: ObservableObject {
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: "org.nexora.mesh.drafts.v1",
             kSecAttrAccount as String: account,
-            kSecAttrAccessible as String: kSecAttrAccessibleWhenUnlockedThisDeviceOnly,
             kSecReturnData as String: true
         ]
         var item: CFTypeRef?
