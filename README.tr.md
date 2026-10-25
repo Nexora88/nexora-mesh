@@ -2,15 +2,15 @@
 
 **Android ve Apple platformları için internet olmadan yakındaki cihazlarla iletişim kurmayı hedefleyen, afet dayanıklılığı odaklı bir mesajlaşma projesi.** Hedefimiz; orman yangını, deprem, sel ve dağ arama-kurtarma gibi bağlantının kesilebildiği koşullarda da işe yarayabilecek güvenilir bir iletişim markası oluşturmaktır.
 
-> **Dürüst durum notu:** Bu dal, Android Bluetooth Classic keşfini, Android sistem eşleştirmesini, doğrudan RFCOMM metin aktarımını ve bu aktarıma bağlı sohbet arayüzünü ekler. CI ve iki gerçek telefonda test henüz doğrulanmadı. Uygulama seviyesinde uçtan uca şifreleme, mesh aktarma ve iOS radyo bağlantısı uygulanmadı. Acil durumlarda kullanıma hazır değildir.
+> **Dürüst durum notu:** Bu dal, Android Bluetooth Classic keşfini, Android sistem eşleştirmesini, doğrudan RFCOMM metin aktarımını ve bu aktarıma bağlı sohbet arayüzünü ekler. Son CI çalışması bu eklemelerle birlikte henüz tamamlanmadı. İki gerçek telefonda test henüz doğrulanmadı. Uygulama seviyesinde uçtan uca şifreleme ve iOS radyo bağlantısı uygulanmadı. Çok atlamalı aktarım için Rust tarafında ilk, sınırlı store-and-forward çekirdeği eklendi; Android Bluetooth aktarımına bağlı değil. Acil durumlarda kullanıma hazır değildir.
 
 ## Android çevrimdışı bağlantı prototipi
 
 İlk aktarım katmanı Bluetooth Classic RFCOMM kullanır. Kullanıcı cihaz aramasını kendisi başlatır; yakındaki cihaz otomatik olarak güvenilir sayılmaz. Kullanıcı cihazı seçmeli ve her iki telefonda da Android sistem eşleştirme isteğini onaylamalıdır. Eşleştirmeden sonra bir telefon gelen bağlantıyı bekler, diğeri bağlanır. İnternet kapalıyken doğrudan metin iletimi hedeflenmiştir.
 
-İki fiziksel cihazla deneme adımları: [Android Bluetooth test rehberi](docs/ANDROID_BLUETOOTH_TEST.md).
+İki fiziksel cihazla deneme adımları: [Android Bluetooth test rehberi](docs/ANDROID_BLUETOOTH_TEST.md). APK indirme ve sürüm yayımlama: [Android APK rehberi](docs/ANDROID_INSTALL.md).
 
-**Sınırlar:** Aynı anda tek doğrudan bağlantı vardır. Android sistem eşleştirmesi ilk güven kapısıdır; uygulama seviyesinde kimlik doğrulama protokolü değildir. QR/kodla kimlik doğrulama, incelenmiş uçtan uca şifreleme, kalıcı mesaj geçmişi, teslim raporları, Apple uyumluluğu ve mesh aktarma sonraki işlerdir. CI derlemesi gerçek telefonlarda Bluetooth'un çalıştığını kanıtlamaz.
+**Sınırlar:** Aynı anda tek doğrudan bağlantı vardır. Android sistem eşleştirmesi ilk güven kapısıdır; uygulama seviyesinde kimlik doğrulama protokolü değildir. QR/kodla kimlik doğrulama, incelenmiş uçtan uca şifreleme, kalıcı mesaj geçmişi, teslim raporları, Apple uyumluluğu ve gerçek radyo üzerinden mesh aktarma sonraki işlerdir. CI derlemesi gerçek telefonlarda Bluetooth'un çalıştığını kanıtlamaz.
 
 ## Vizyon
 
@@ -33,12 +33,14 @@ Gizlilik varsayılan olmalı. Keşif kullanıcı tarafından başlatılır; yak�
 - [x] Android Bluetooth keşfi ve sistem eşleştirmesi kodlandı (gerçek cihaz testi bekliyor)
 - [x] Doğrudan RFCOMM metin aktarımı kodlandı (gerçek cihaz testi bekliyor)
 - [x] İki telefonla deneme rehberi
-- [ ] Android CI derlemesi ve kurulum doğrulaması
+- [x] Rust tarafında sınırlı, test edilebilir relay queue / hop-limit çekirdeği (Android transport bağlantısı yok)
+- [x] CI debug APK artefaktı ve etiket tabanlı GitHub Release iş akışı eklendi
+- [ ] Güncel CI derlemesinin ve relay testlerinin başarıyla tamamlanması
 - [ ] İnternet kapalıyken iki fiziksel Android cihaz arasında çift yönlü mesaj testi
 - [ ] Uygulama seviyesinde kimlik doğrulama ve incelenmiş uçtan uca şifreleme
 - [ ] Kalıcı sohbet geçmişi ve güvenilir teslim durumu
 - [ ] iOS Xcode projesi ve gerçek cihaz derlemesi
-- [ ] İzinli mesh aktarma ve saha menzili testleri
+- [ ] Android Bluetooth taşıyıcısına gerçek multi-hop aktarımının bağlanması ve üç cihaz testi
 - [ ] Dosya, ses ve görüntülü arama
 
 Kaynak kodda bulunması, özelliğin test edilmiş çalışır durumda olduğu anlamına gelmez.
@@ -47,17 +49,23 @@ Kaynak kodda bulunması, özelliğin test edilmiş çalışır durumda olduğu a
 
 - android/ — Android uygulaması ve Bluetooth aktarımı
 - ios/ — SwiftUI arayüz başlangıcı ve Apple platformu notları
-- crates/mesh-core/ — Rust protokol çekirdeği
+- crates/mesh-core/ — Rust çerçeveleme ve ilk relay queue çekirdeği
 - docs/PRODUCT_VISION.md — ürün vizyonu ve gizlilik kuralları
 - docs/PROTOCOL.md — protokol notları
+- docs/RELAY_ROUTING.md — çok atlamalı aktarım modeli ve sınırlar
 - docs/THREAT_MODEL.md — güvenlik sınırları
 - docs/ROADMAP.md — geliştirme aşamaları
 - docs/ANDROID_BLUETOOTH_TEST.md — iki fiziksel cihaz test adımları
+- docs/ANDROID_INSTALL.md — APK indirme ve kurma
 - tools/ — Python yardımcı araçları ve testler
 
 ## Menzil hakkında
 
-Bluetooth menzili sınırsız değildir; donanım, arazi, engeller, parazit ve pil durumu etkiler. Ara cihazlarla çok atlamalı aktarım erişimi artırabilir fakat teslimatı veya belirli bir mesafeyi garanti etmez. Mesh aktarımı henüz uygulanmadı.
+Bluetooth menzili sınırsız değildir; donanım, arazi, engeller, parazit ve pil durumu etkiler. Ara cihazlarla çok atlamalı aktarım erişimi artırabilir fakat teslimatı veya belirli bir mesafeyi garanti etmez. Rust'taki ilk relay çekirdeği henüz Android aktarım katmanına bağlanmadığından şu an A→B→C mesaj iletimi yoktur.
+
+## Medya hakkında
+
+Herhangi bir videoyu 10 MB'tan 50 KB'a dönüştürüp aynı kaliteyle yeniden kurmayı garanti eden genel bir yapay zekâ sıkıştırıcısı yoktur. Gerçekçi geliştirme yolu standart ses/video codec'leri, ayarlanabilir kalite, parçalı aktarım ve devam ettirmedir. Medya transferi, metin aktarımı, kimlik ve E2EE güvenilir hâle geldikten sonra ele alınacaktır.
 
 ## Güvenlik ilkeleri
 
@@ -69,4 +77,4 @@ Bluetooth menzili sınırsız değildir; donanım, arazi, engeller, parazit ve p
 6. Acil durumlara hazır olduğu gerçek saha testleri olmadan iddia edilmeyecek.
 7. Belgelenmiş gereklilik olmadıkça Android manifestine internet izni eklenmeyecek.
 
-Ayrıntılar: docs/PRODUCT_VISION.md, docs/PROTOCOL.md, docs/THREAT_MODEL.md ve SECURITY.md.
+Ayrıntılar: docs/PRODUCT_VISION.md, docs/PROTOCOL.md, docs/RELAY_ROUTING.md, docs/THREAT_MODEL.md ve SECURITY.md.
