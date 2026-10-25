@@ -57,7 +57,6 @@ class PendingDeliveryQueueTest {
         val restarted = PendingDeliveryQueue(initial = first.snapshot(), persist = { true })
         assertEquals("encrypted-frame", restarted.get("id-1"))
     }
-}
 
     @Test fun duplicateAckCannotRemoveAnyOtherPendingFrame() {
         val queue = PendingDeliveryQueue(persist = { true })
