@@ -109,7 +109,7 @@ pub struct RelayQueue {
     /// Fast lookup for duplicates.
     seen: HashSet<[u8; 16]>,
     /// Optional per-destination index for targeted delivery.
-    by_dest: HashMap<[u8; 16], Vec<[u8; 16]>,
+    by_dest: HashMap<[u8; 16], Vec<[u8; 16]>>,
 }
 
 impl RelayQueue {
