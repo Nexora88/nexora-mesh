@@ -87,7 +87,7 @@ private fun Header() {
             Spacer(Modifier.width(12.dp))
             Column(Modifier.weight(1f)) {
                 Text("NEXORA MESH", color = MeshGreen, fontSize = 19.sp, fontWeight = FontWeight.Black, letterSpacing = 1.2.sp)
-                Text("Yakın cihazlarla. İnternet olmadan.", color = MeshMuted, fontSize = 12.sp)
+                Text("Afetlerde de bağlantı hedefi", color = MeshMuted, fontSize = 12.sp)
             }
             Text("PROTOTİP", color = MeshGreen, fontSize = 10.sp, fontWeight = FontWeight.Bold,
                 modifier = Modifier.background(Color(0xFF18372A), CircleShape).padding(horizontal = 10.dp, vertical = 6.dp))
@@ -100,8 +100,8 @@ private fun Header() {
 @Composable
 private fun ChatsScreen(chats: List<ChatPreview>, onOpen: (ChatPreview) -> Unit) {
     Column(Modifier.fillMaxSize().padding(horizontal = 18.dp)) {
-        Text("Mesajların", color = Color.White, fontSize = 28.sp, fontWeight = FontWeight.Bold)
-        Text("Bağlantı kurulana kadar mesajlar yalnızca bu prototipte yereldir.", color = MeshMuted, fontSize = 13.sp, modifier = Modifier.padding(top = 6.dp, bottom = 16.dp))
+        Text("Sohbetler", color = Color.White, fontSize = 28.sp, fontWeight = FontWeight.Bold)
+        Text("Günlük mesajlaşma ve afetlerde çevrimdışı iletişim için geliştiriliyor. Bu sürüm henüz başka cihaza mesaj iletmez.", color = MeshMuted, fontSize = 13.sp, modifier = Modifier.padding(top = 6.dp, bottom = 16.dp))
         LazyColumn(verticalArrangement = Arrangement.spacedBy(9.dp)) {
             items(chats, key = { it.id }) { chat ->
                 Row(Modifier.fillMaxWidth().background(MeshSurface, RoundedCornerShape(18.dp)).clickable { onOpen(chat) }.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -155,14 +155,14 @@ private fun ChatScreen(chat: ChatPreview, onBack: () -> Unit) {
 @Composable
 private fun DevicesScreen() {
     Column(Modifier.fillMaxSize().padding(22.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-        Text("Yakındaki cihazlar", color = Color.White, fontSize = 27.sp, fontWeight = FontWeight.Bold)
-        Text("Bluetooth ve Wi-Fi Direct keşfi sonraki geliştirme adımıdır.", color = MeshMuted)
+        Text("Cihazlar ve eşleştirme", color = Color.White, fontSize = 27.sp, fontWeight = FontWeight.Bold)
+        Text("Varsayılan hedef: gizlilik. Keşif, kullanıcı tarafından süreli başlatılmalı; yakındaki cihazlar otomatik olarak güvenilir kişi sayılmamalı.", color = MeshMuted)
         Column(Modifier.fillMaxWidth().background(MeshSurface, RoundedCornerShape(20.dp)).padding(20.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Icon(Icons.Default.Devices, null, tint = MeshGreen, modifier = Modifier.size(32.dp))
-            Text("Henüz tarama yapılmıyor", color = Color.White, fontWeight = FontWeight.Bold)
-            Text("Bu prototip radyo bağlantısı başlatmaz ve yakındaki cihazları bulduğunu iddia etmez.", color = MeshMuted, fontSize = 13.sp)
+            Text("Radyo keşfi henüz etkin değil", color = Color.White, fontWeight = FontWeight.Bold)
+            Text("Yalnızca iki tarafın da onayladığı ve kimlik doğrulaması yapılan cihazlar güvenilir kişi listesine alınmalı. Bluetooth/Wi-Fi keşfi ve gerçek bağlantı henüz uygulanmadı.", color = MeshMuted, fontSize = 13.sp)
         }
-        Button(onClick = {}, enabled = false, modifier = Modifier.fillMaxWidth()) { Text("Cihaz ara · yakında") }
+        Button(onClick = {}, enabled = false, modifier = Modifier.fillMaxWidth()) { Text("Güvenli cihaz ara · henüz kullanılamıyor") }
     }
 }
 
@@ -172,11 +172,11 @@ private fun ProfileScreen() {
         Text("Profil ve güvenlik", color = Color.White, fontSize = 27.sp, fontWeight = FontWeight.Bold)
         Column(Modifier.fillMaxWidth().background(MeshSurface, RoundedCornerShape(18.dp)).padding(18.dp), verticalArrangement = Arrangement.spacedBy(7.dp)) {
             Text("Bu cihaz", color = MeshGreen, fontWeight = FontWeight.Bold)
-            Text("Kimlik anahtarı ve cihaz eşleştirme henüz uygulanmadı.", color = Color.White)
+            Text("Güvenilir cihaz kimliği, iki taraflı onay ve doğrulama kodu/QR akışı henüz uygulanmadı.", color = Color.White)
         }
         Column(Modifier.fillMaxWidth().background(MeshSurface, RoundedCornerShape(18.dp)).padding(18.dp), verticalArrangement = Arrangement.spacedBy(7.dp)) {
-            Text("Çevrimdışı tasarım", color = MeshGreen, fontWeight = FontWeight.Bold)
-            Text("Uygulamaya internet izni eklenmedi. Gerçek mesajlaşma için yerel radyo aktarımı ve uçtan uca şifreleme geliştirilmelidir.", color = Color.White)
+            Text("Afet iletişimi vizyonu", color = MeshGreen, fontWeight = FontWeight.Bold)
+            Text("Orman yangını, deprem, sel ve dağ arama-kurtarma için bağlantı dayanıklılığı hedefleniyor. Menzil artırımı için izinli ara cihazlar ve çok atlamalı aktarım planlanıyor; radyo, şifreleme ve mesh aktarımı henüz hazır değil. Bu prototip acil durum aracı değildir.", color = Color.White)
         }
     }
 }
