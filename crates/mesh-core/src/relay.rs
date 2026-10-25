@@ -168,10 +168,16 @@ mod tests {
     fn relay_is_disabled_by_default_and_can_be_opted_in() {
         let mut queue = RelayQueue::new(4, 8);
         assert!(!queue.relay_enabled());
-        assert_eq!(queue.enqueue(envelope(1, 3, 100), 1), RelayDecision::DropRelayDisabled);
+        assert_eq!(
+            queue.enqueue(envelope(1, 3, 100), 1),
+            RelayDecision::DropRelayDisabled
+        );
         queue.set_relay_enabled(true);
         assert!(queue.relay_enabled());
-        assert_eq!(queue.enqueue(envelope(1, 3, 100), 1), RelayDecision::Forward);
+        assert_eq!(
+            queue.enqueue(envelope(1, 3, 100), 1),
+            RelayDecision::Forward
+        );
         queue.set_relay_enabled(false);
         assert!(queue.is_empty());
     }
