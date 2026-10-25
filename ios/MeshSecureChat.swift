@@ -221,7 +221,7 @@ final class MeshSecureChat: ObservableObject {
         ]
         var item: CFTypeRef?
         let status = SecItemCopyMatching(query as CFDictionary, &item)
-        if status == errSecSuccess, let key = item as? SecKey { return key }
+        if status == errSecSuccess, let item { return item as! SecKey }
         guard status == errSecItemNotFound else { throw MeshSecureChatError.keyStore }
         let attributes: [String: Any] = [
             kSecAttrKeyType as String: kSecAttrKeyTypeECSECPrimeRandom,
@@ -233,7 +233,8 @@ final class MeshSecureChat: ObservableObject {
         ]
         var error: Unmanaged<CFError>?
         guard let key = SecKeyCreateRandomKey(attributes as CFDictionary, &error) else {
-            throw error?.takeRetainedValue() ?? (NSError(domain: "NexoraMesh.KeyStore", code: Int(status)) as CFError)
+            if let error { throw error.takeRetainedValue() }
+            throw NSError(domain: "NexoraMesh.KeyStore", code: Int(status))
         }
         return key
     }
@@ -243,7 +244,8 @@ final class MeshSecureChat: ObservableObject {
         guard let publicKey = SecKeyCopyPublicKey(privateKey) else { throw MeshSecureChatError.keyStore }
         var error: Unmanaged<CFError>?
         guard let raw = SecKeyCopyExternalRepresentation(publicKey, &error) as Data? else {
-            throw error?.takeRetainedValue() ?? (NSError(domain: "NexoraMesh.KeyStore", code: 2) as CFError)
+            if let error { throw error.takeRetainedValue() }
+            throw NSError(domain: "NexoraMesh.KeyStore", code: 2)
         }
         // SubjectPublicKeyInfo prefix for id-ecPublicKey / prime256v1, matching Java X.509 encoding.
         let prefix = Data([0x30,0x59,0x30,0x13,0x06,0x07,0x2A,0x86,0x48,0xCE,0x3D,0x02,0x01,
@@ -267,7 +269,8 @@ final class MeshSecureChat: ObservableObject {
         ]
         var error: Unmanaged<CFError>?
         guard let key = SecKeyCreateWithData(raw, attributes as CFDictionary, &error) else {
-            throw error?.takeRetainedValue() ?? (NSError(domain: "NexoraMesh.Contact", code: 1) as CFError)
+            if let error { throw error.takeRetainedValue() }
+            throw NSError(domain: "NexoraMesh.Contact", code: 1)
         }
         return key
     }
@@ -280,7 +283,8 @@ final class MeshSecureChat: ObservableObject {
             var error: Unmanaged<CFError>?
             guard let shared = SecKeyCopyKeyExchangeResult(privateKey, .ecdhKeyExchangeStandard,
                                                            remoteKey, [:] as CFDictionary, &error) as Data? else {
-                throw error?.takeRetainedValue() ?? (NSError(domain: "NexoraMesh.KeyStore", code: 2) as CFError)
+                if let error { throw error.takeRetainedValue() }
+                throw NSError(domain: "NexoraMesh.KeyStore", code: 2)
             }
             let kdfKey = SymmetricKey(data: Data("NexoraMesh/session-key/v1".utf8))
             let key = SymmetricKey(data: Data(HMAC<SHA256>.authenticationCode(for: shared, using: kdfKey)))
