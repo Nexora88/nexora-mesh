@@ -70,3 +70,7 @@ Bluetooth does not provide unlimited range. Hardware, terrain, obstacles, interf
 7. Keep internet permission out of the Android manifest unless a documented requirement justifies it.
 
 See docs/PRODUCT_VISION.md, docs/PROTOCOL.md, docs/THREAT_MODEL.md, and SECURITY.md.
+
+## Privacy and security status
+
+The Android BLE path is experimentally connected to the existing QR-trust and encrypted chat protocol. It is not independently audited and does not provide forward secrecy; iOS remains transport-only and Android↔iOS encrypted chat is not complete. See [the privacy/security threat model](docs/PRIVACY_SECURITY.md) and [cross-platform transport status](docs/CROSS_PLATFORM_TRANSPORT.md). Do not use this prototype for emergency guarantees or highly sensitive communication.
