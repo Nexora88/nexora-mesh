@@ -83,10 +83,69 @@ pub unsafe extern "C" fn nm_wire_forward(
     .unwrap_or(-127)
 }
 
+/// Return a recommended scan interval in seconds from host battery/activity signals.
+/// The OS remains authoritative; this function does not schedule background work.
+///
+/// # Safety
+/// No pointers are accepted; all boolean-like parameters must be 0 or 1.
+#[no_mangle]
+pub extern "C" fn nm_relay_scan_interval_seconds(
+    battery_percent: u8,
+    charging: u8,
+    low_power_mode: u8,
+    app_foreground: u8,
+    recently_connected: u8,
+    urgent_pending: u8,
+) -> u64 {
+    catch_unwind(AssertUnwindSafe(|| {
+        let state = crate::relay::RelayPowerState {
+            battery_percent: battery_percent.min(100),
+            charging: charging != 0,
+            low_power_mode: low_power_mode != 0,
+            app_foreground: app_foreground != 0,
+            recently_connected: recently_connected != 0,
+            urgent_pending: urgent_pending != 0,
+        };
+        crate::relay::SmartRelayPolicy::default().recommended_scan_interval_seconds(state)
+    }))
+    .unwrap_or(300)
+}
+
+/// Return 1 only when relaying is explicitly opted into and power policy permits it.
+#[no_mangle]
+pub extern "C" fn nm_relay_may_forward(
+    opted_in: u8,
+    battery_percent: u8,
+    charging: u8,
+    low_power_mode: u8,
+    app_foreground: u8,
+) -> u8 {
+    catch_unwind(AssertUnwindSafe(|| {
+        let state = crate::relay::RelayPowerState {
+            battery_percent: battery_percent.min(100),
+            charging: charging != 0,
+            low_power_mode: low_power_mode != 0,
+            app_foreground: app_foreground != 0,
+            recently_connected: false,
+            urgent_pending: false,
+        };
+        u8::from(crate::relay::SmartRelayPolicy::default().may_relay(state, opted_in != 0))
+    }))
+    .unwrap_or(0)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::relay::Envelope;
+
+    #[test]
+    fn power_policy_ffi_sleeps_on_low_battery_and_needs_opt_in() {
+        assert_eq!(nm_relay_scan_interval_seconds(5, 0, 1, 0, 0, 0), 300);
+        assert_eq!(nm_relay_may_forward(0, 90, 0, 0, 1), 0);
+        assert_eq!(nm_relay_may_forward(1, 90, 0, 0, 1), 1);
+        assert_eq!(nm_relay_may_forward(1, 5, 0, 1, 0), 0);
+    }
 
     #[test]
     fn ffi_validate_and_forward_round_trip() {
