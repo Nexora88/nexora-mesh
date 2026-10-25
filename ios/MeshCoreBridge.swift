@@ -33,8 +33,7 @@ enum MeshCoreBridge {
         guard written > 0, written <= output.count else {
             throw MeshCoreError.forwardRejected(Int32(clamping: written))
         }
-        output.count = written
-        return output
+        return Data(output.prefix(written))
     }
 }
 
