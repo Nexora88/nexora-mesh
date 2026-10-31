@@ -201,9 +201,13 @@ class BleGattTransport(context: Context) {
         val batteryPercent = battery.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY).coerceIn(0, 100)
         val power = app.getSystemService(Context.POWER_SERVICE) as PowerManager
         val lowPower = power.isPowerSaveMode
+        val batteryIntent = app.registerReceiver(null, android.content.IntentFilter(Intent.ACTION_BATTERY_CHANGED))
+        val batteryStatus = batteryIntent?.getIntExtra(BatteryManager.EXTRA_STATUS, -1) ?: -1
+        val charging = batteryStatus == BatteryManager.BATTERY_STATUS_CHARGING ||
+            batteryStatus == BatteryManager.BATTERY_STATUS_FULL
         val interval = runCatching {
             NativeMesh.recommendedScanIntervalSeconds(
-                batteryPercent, charging = false, lowPowerMode = lowPower,
+                batteryPercent, charging = charging, lowPowerMode = lowPower,
                 appForeground = true, recentlyConnected = false, urgentPending = false
             )
         }.getOrDefault(45L)
