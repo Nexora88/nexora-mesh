@@ -1,6 +1,7 @@
 import CoreBluetooth
 import Foundation
 import Combine
+import UIKit
 
 /// Cross-platform BLE GATT transport for complete, bounded Nexora Mesh wire envelopes.
 /// It moves bytes only; callers must authenticate peers and encrypt payloads before sending.
@@ -29,6 +30,9 @@ final class MeshBLETransport: NSObject, ObservableObject {
     private var notificationOffset = 0
     private var currentTransferID: Data?
     private var nextFragmentIndex = 0
+    private var discoveryRequested = false
+    private var scanWindowWorkItem: DispatchWorkItem?
+    private var scanRestartWorkItem: DispatchWorkItem?
 
     private struct Assembly {
         let count: Int
@@ -49,22 +53,75 @@ final class MeshBLETransport: NSObject, ObservableObject {
             queue: .main,
             options: [CBPeripheralManagerOptionRestoreIdentifierKey: "org.nexora.mesh.ble.peripheral.v1"]
         )
+        NotificationCenter.default.addObserver(
+            self, selector: #selector(applicationDidBecomeActive),
+            name: UIApplication.didBecomeActiveNotification, object: nil
+        )
     }
 
     func startDiscovery() {
-        guard central.state == .poweredOn else {
-            status = "Bluetooth açık değil veya bu cihazda kullanılamıyor."
-            return
-        }
-        central.scanForPeripherals(withServices: [Self.serviceUUID],
-                                   options: [CBCentralManagerScanOptionAllowDuplicatesKey: false])
-        isScanning = true
-        status = "Nexora Mesh BLE cihazları aranıyor."
+        discoveryRequested = true
+        beginForegroundScanWindow()
     }
 
     func stopDiscovery() {
+        discoveryRequested = false
+        scanWindowWorkItem?.cancel()
+        scanRestartWorkItem?.cancel()
+        scanWindowWorkItem = nil
+        scanRestartWorkItem = nil
         central.stopScan()
         isScanning = false
+    }
+
+    @objc private func applicationDidBecomeActive() {
+        guard discoveryRequested, central.state == .poweredOn, !central.isScanning else { return }
+        beginForegroundScanWindow()
+    }
+
+    private func beginForegroundScanWindow() {
+        guard discoveryRequested, central.state == .poweredOn else {
+            status = "Bluetooth açık değil veya bu cihazda kullanılamıyor."
+            return
+        }
+        scanRestartWorkItem?.cancel()
+        central.scanForPeripherals(withServices: [Self.serviceUUID],
+                                   options: [CBCentralManagerScanOptionAllowDuplicatesKey: false])
+        isScanning = true
+        status = "Nexora Mesh BLE taraması etkin."
+        guard UIApplication.shared.applicationState == .active else {
+            status = "iOS arka plan BLE taraması OS tarafından zamanlanıyor; sürekli tarama garantisi yok."
+            return
+        }
+
+        UIDevice.current.isBatteryMonitoringEnabled = true
+        let batteryPercent = UIDevice.current.batteryLevel < 0
+            ? 100 : UInt8((UIDevice.current.batteryLevel * 100).rounded()).clamped(to: 0...100)
+        let charging = UIDevice.current.batteryState == .charging || UIDevice.current.batteryState == .full
+        let interval = MeshCoreBridge.recommendedScanIntervalSeconds(
+            batteryPercent: batteryPercent,
+            charging: charging,
+            lowPowerMode: ProcessInfo.processInfo.isLowPowerModeEnabled,
+            appForeground: true,
+            recentlyConnected: connectedPeripheral != nil,
+            urgentPending: !pendingWrites.isEmpty || !pendingNotifications.isEmpty
+        )
+        let stopWindow = DispatchWorkItem { [weak self] in
+            guard let self, self.discoveryRequested else { return }
+            // If the app moved to background, keep the CoreBluetooth scan active and let iOS
+            // apply its documented background scheduling/coalescing behavior.
+            guard UIApplication.shared.applicationState == .active else {
+                self.status = "Arka plan BLE taraması iOS tarafından yönetiliyor."
+                return
+            }
+            self.central.stopScan()
+            self.isScanning = false
+            let restart = DispatchWorkItem { [weak self] in self?.beginForegroundScanWindow() }
+            self.scanRestartWorkItem = restart
+            DispatchQueue.main.asyncAfter(deadline: .now() + .seconds(Int(max(5, interval))), execute: restart)
+        }
+        scanWindowWorkItem = stopWindow
+        DispatchQueue.main.asyncAfter(deadline: .now() + .seconds(3), execute: stopWindow)
     }
 
     func connect(to id: UUID) {
