@@ -52,7 +52,7 @@ class RelayEnvelopeStore(context: Context) {
             prefs.edit().putBoolean(OPT_IN_KEY, enabled).commit()
             if (!enabled) {
                 queue.clear()
-                persistQueue()
+                persistAll()
             }
         }
     }
@@ -66,7 +66,7 @@ class RelayEnvelopeStore(context: Context) {
         queue[id] = envelope.copyOf()
         seen[id] = Unit
         while (seen.size > MAX_SEEN) seen.remove(seen.keys.first())
-        persistQueue() && persistSeen()
+        persistAll()
     }
 
     /**
@@ -82,24 +82,24 @@ class RelayEnvelopeStore(context: Context) {
     /** Call only after the next device confirms durable acceptance of this message ID. */
     fun acknowledgeStoredByNextHop(messageIdHex: String): Boolean = synchronized(lock) {
         if (queue.remove(messageIdHex.lowercase()) == null) return false
-        persistQueue()
+        persistAll()
     }
 
     fun pendingCount(): Int = synchronized(lock) { queue.size }
 
-    private fun persistQueue(): Boolean {
+    /** Queue and replay window are committed together to avoid half-written state. */
+    private fun persistAll(): Boolean {
         val rows = JSONArray()
         queue.forEach { (id, bytes) ->
             rows.put(org.json.JSONObject()
                 .put("id", id)
                 .put("frame", Base64.encodeToString(bytes, Base64.NO_WRAP)))
         }
-        return prefs.edit().putString(QUEUE_KEY, rows.toString()).commit()
-    }
-
-    private fun persistSeen(): Boolean {
-        val rows = JSONArray()
-        seen.keys.forEach(rows::put)
-        return prefs.edit().putString(SEEN_KEY, rows.toString()).commit()
+        val replay = JSONArray()
+        seen.keys.forEach(replay::put)
+        return prefs.edit()
+            .putString(QUEUE_KEY, rows.toString())
+            .putString(SEEN_KEY, replay.toString())
+            .commit()
     }
 }
