@@ -20,6 +20,11 @@ targets:
       - path: .
         includes:
           - "**/*.swift"
+    info:
+      properties:
+        UIBackgroundModes:
+          - bluetooth-central
+          - bluetooth-peripheral
     dependencies:
       - framework: ../dist/ios/MeshCore.xcframework
         embed: false
