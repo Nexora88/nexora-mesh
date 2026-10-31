@@ -1,4 +1,4 @@
-use btleplug::api::{Central, Manager as _, ScanFilter};
+use btleplug::api::{Central, Manager as _, Peripheral as _, ScanFilter};
 use btleplug::platform::{Adapter, Manager};
 use serde::Serialize;
 use std::sync::Mutex;
