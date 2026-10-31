@@ -55,6 +55,29 @@ final class MeshSecureChatCryptoTests: XCTestCase {
         XCTAssertFalse(MeshSecureChat.acceptMessageID("not-a-uuid", seen: []))
     }
 
+    func testRustPowerPolicyUsesDeepSleepForLowBatteryBackgroundState() {
+        let interval = MeshCoreBridge.recommendedScanIntervalSeconds(
+            batteryPercent: 5, charging: false, lowPowerMode: true,
+            appForeground: false, recentlyConnected: false, urgentPending: false
+        )
+        XCTAssertEqual(interval, 300)
+        XCTAssertFalse(MeshCoreBridge.mayRelay(
+            optedIn: true, batteryPercent: 5, charging: false,
+            lowPowerMode: true, appForeground: false
+        ))
+    }
+
+    func testRustPowerPolicyRequiresExplicitRelayOptIn() {
+        XCTAssertFalse(MeshCoreBridge.mayRelay(
+            optedIn: false, batteryPercent: 90, charging: false,
+            lowPowerMode: false, appForeground: true
+        ))
+        XCTAssertTrue(MeshCoreBridge.mayRelay(
+            optedIn: true, batteryPercent: 90, charging: false,
+            lowPowerMode: false, appForeground: true
+        ))
+    }
+
     func testMalformedWirePacketDoesNotCreateMessage() {
         let chat = MeshSecureChat()
         chat.receive(Data("not-json".utf8))
