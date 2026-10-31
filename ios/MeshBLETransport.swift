@@ -39,8 +39,16 @@ final class MeshBLETransport: NSObject, ObservableObject {
 
     override init() {
         super.init()
-        central = CBCentralManager(delegate: self, queue: .main)
-        peripheralManager = CBPeripheralManager(delegate: self, queue: .main)
+        central = CBCentralManager(
+            delegate: self,
+            queue: .main,
+            options: [CBCentralManagerOptionRestoreIdentifierKey: "org.nexora.mesh.ble.central.v1"]
+        )
+        peripheralManager = CBPeripheralManager(
+            delegate: self,
+            queue: .main,
+            options: [CBPeripheralManagerOptionRestoreIdentifierKey: "org.nexora.mesh.ble.peripheral.v1"]
+        )
     }
 
     func startDiscovery() {
@@ -210,6 +218,17 @@ final class MeshBLETransport: NSObject, ObservableObject {
 }
 
 extension MeshBLETransport: CBCentralManagerDelegate {
+    func centralManager(_ central: CBCentralManager, willRestoreState dict: [String: Any]) {
+        if let restored = dict[CBCentralManagerRestoredStatePeripheralsKey] as? [CBPeripheral] {
+            for peer in restored {
+                peripherals[peer.identifier] = peer
+                peer.delegate = self
+                discoveredNames[peer.identifier] = peer.name ?? "Geri yüklenen Nexora cihazı"
+            }
+        }
+        status = "iOS BLE durumu işletim sistemi tarafından geri yüklendi; arka plan zamanlaması iOS denetimindedir."
+    }
+
     func centralManagerDidUpdateState(_ central: CBCentralManager) {
         status = central.state == .poweredOn ? "Bluetooth hazır." : "Bluetooth kullanılamıyor."
         if central.state == .poweredOn { startPeripheralServiceIfReady() }
@@ -277,6 +296,16 @@ extension MeshBLETransport: CBPeripheralDelegate {
 }
 
 extension MeshBLETransport: CBPeripheralManagerDelegate {
+    func peripheralManager(_ peripheral: CBPeripheralManager, willRestoreState dict: [String: Any]) {
+        if let restored = dict[CBPeripheralManagerRestoredStateServicesKey] as? [CBMutableService],
+           let service = restored.first(where: { $0.uuid == Self.serviceUUID }),
+           let item = service.characteristics?.first(where: { $0.uuid == Self.dataUUID }) as? CBMutableCharacteristic {
+            characteristic = item
+            subscribedCentrals = item.subscribedCentrals ?? []
+        }
+        status = "iOS BLE yayın durumu geri yüklendi; sürekli arka plan yayını garanti edilmez."
+    }
+
     private func startPeripheralServiceIfReady() {
         guard peripheralManager.state == .poweredOn, characteristic == nil else { return }
         let value = CBMutableCharacteristic(type: Self.dataUUID,
