@@ -64,6 +64,9 @@ class BleGattTransport(context: Context) {
     @Volatile private var serverPeerReady = false
     @Volatile private var notificationInFlight = false
     private val lock = Any()
+    private val scanHandler = android.os.Handler(android.os.Looper.getMainLooper())
+    @Volatile private var scanWindowRunnable: Runnable? = null
+    @Volatile private var scanRestartRunnable: Runnable? = null
 
     private data class Assembly(val count: Int, val createdAtMs: Long = android.os.SystemClock.elapsedRealtime(), val chunks: MutableMap<Int, ByteArray> = mutableMapOf(), var bytes: Int = 0)
 
@@ -78,12 +81,16 @@ class BleGattTransport(context: Context) {
 
     /** Explicitly stop discovery when the user leaves the nearby-devices workflow. */
     fun stopDiscovery() {
+        scanWindowRunnable?.let(scanHandler::removeCallbacks)
+        scanRestartRunnable?.let(scanHandler::removeCallbacks)
+        scanWindowRunnable = null
+        scanRestartRunnable = null
         try { adapter?.bluetoothLeScanner?.stopScan(scanCallback) } catch (_: Exception) {}
         status("BLE taraması durduruldu; arka planda sürekli tarama yapılmıyor.")
     }
 
     fun stop() {
-        try { adapter?.bluetoothLeScanner?.stopScan(scanCallback) } catch (_: Exception) {}
+        stopDiscovery()
         try { adapter?.bluetoothLeAdvertiser?.stopAdvertising(advertiseCallback) } catch (_: Exception) {}
         try { gatt?.disconnect(); gatt?.close() } catch (_: Exception) {}
         gatt = null
@@ -218,10 +225,24 @@ class BleGattTransport(context: Context) {
         }
         val settings = ScanSettings.Builder()
             .setScanMode(scanMode)
-            .setReportDelay(interval.coerceAtMost(60L) * 1000L)
+            .setReportDelay(0)
             .build()
-        scanner.startScan(listOf(filter), settings, scanCallback)
-        status("Nexora Mesh BLE taraması güç tasarrufu modunda çalışıyor (önerilen aralık: ${interval}s).")
+        scanWindowRunnable?.let(scanHandler::removeCallbacks)
+        scanRestartRunnable?.let(scanHandler::removeCallbacks)
+        try {
+            scanner.startScan(listOf(filter), settings, scanCallback)
+            status("BLE kısa tarama penceresi açık; sonraki pencere yaklaşık ${interval}s sonra.")
+            val stopWindow = Runnable {
+                try { adapter?.bluetoothLeScanner?.stopScan(scanCallback) } catch (_: Exception) {}
+                val restart = Runnable { startScan() }
+                scanRestartRunnable = restart
+                scanHandler.postDelayed(restart, interval.coerceAtLeast(5L) * 1000L)
+            }
+            scanWindowRunnable = stopWindow
+            scanHandler.postDelayed(stopWindow, 3_000L)
+        } catch (_: SecurityException) {
+            status("BLE tarama izni yok; tarama durduruldu.")
+        }
     }
 
     private val scanCallback = object : ScanCallback() {
