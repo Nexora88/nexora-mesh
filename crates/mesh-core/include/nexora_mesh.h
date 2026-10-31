@@ -12,6 +12,11 @@ int32_t nm_wire_validate(const uint8_t *input, size_t input_len);
 intptr_t nm_wire_forward(const uint8_t *input, size_t input_len,
                          uint8_t *output, size_t output_capacity,
                          uint64_t now_unix);
+uint64_t nm_relay_scan_interval_seconds(uint8_t battery_percent, uint8_t charging,
+    uint8_t low_power_mode, uint8_t app_foreground, uint8_t recently_connected,
+    uint8_t urgent_pending);
+uint8_t nm_relay_may_forward(uint8_t opted_in, uint8_t battery_percent,
+    uint8_t charging, uint8_t low_power_mode, uint8_t app_foreground);
 #ifdef __cplusplus
 }
 #endif
