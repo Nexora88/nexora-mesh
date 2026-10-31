@@ -75,7 +75,11 @@ final class MeshBLETransport: NSObject, ObservableObject {
     }
 
     @objc private func applicationDidBecomeActive() {
-        guard discoveryRequested, central.state == .poweredOn, !central.isScanning else { return }
+        guard discoveryRequested, central.state == .poweredOn else { return }
+        if central.isScanning {
+            central.stopScan()
+            isScanning = false
+        }
         beginForegroundScanWindow()
     }
 
@@ -413,6 +417,12 @@ extension MeshBLETransport: CBPeripheralManagerDelegate {
             acceptFragment(value)
             peripheral.respond(to: request, withResult: .success)
         }
+    }
+}
+
+private extension UInt8 {
+    func clamped(to range: ClosedRange<UInt8>) -> UInt8 {
+        min(max(self, range.lowerBound), range.upperBound)
     }
 }
 
