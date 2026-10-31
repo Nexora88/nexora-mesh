@@ -176,7 +176,7 @@ final class MeshSecureChat: ObservableObject {
         guard packet.count <= 256 * 1024,
               let frame = try? JSONSerialization.jsonObject(with: packet) as? [String: Any],
               let type = frame["t"] as? String else {
-            status = "Geçersiz veya çok büyük paket reddedildi."
+            status = "Paket reddedildi: geçersiz JSON veya boyut sınırı aşıldı."
             return
         }
         do {
@@ -235,12 +235,12 @@ final class MeshSecureChat: ObservableObject {
                       let ciphertext = Data(base64Encoded: cipherText) else { throw MeshSecureChatError.invalidProof }
                 let plaintext = try Self.open(nonce: nonce, ciphertext: ciphertext, key: key,
                                               aad: Data("NexoraMesh/data/v1:\(id)".utf8))
-                var received = defaults.stringArray(forKey: receivedKey) ?? []
+                var received = loadReceivedIDs()
                 let isNew = Self.acceptMessageID(id, seen: received)
                 if isNew {
                     received.append(id)
                     if received.count > 4096 { received.removeFirst(received.count - 4096) }
-                    defaults.set(received, forKey: receivedKey)
+                    try saveReceivedIDs(received)
                     messages.append(Message(id: id, text: String(decoding: plaintext, as: UTF8.self),
                                             outgoing: false, createdAt: Date(), delivery: "Alındı",
                                             recipientFingerprint: remoteFingerprint))
@@ -448,13 +448,66 @@ final class MeshSecureChat: ObservableObject {
         }
     }
 
+    /// Pending frames are end-to-end ciphertext; Keychain protects durable queue state at rest.
     private func loadPending() -> [Pending] {
-        guard let data = defaults.data(forKey: pendingKey) else { return [] }
-        return (try? JSONDecoder().decode([Pending].self, from: data)) ?? []
+        let data = (try? secureStoreRead(account: pendingKey)) ?? defaults.data(forKey: pendingKey)
+        guard let data, let decoded = try? JSONDecoder().decode([Pending].self, from: data) else { return [] }
+        if (try? secureStoreWrite(data, account: pendingKey)) != nil { defaults.removeObject(forKey: pendingKey) }
+        return decoded
     }
 
     private func savePending(_ pending: [Pending]) throws {
-        defaults.set(try JSONEncoder().encode(pending), forKey: pendingKey)
+        try secureStoreWrite(JSONEncoder().encode(pending), account: pendingKey)
+        defaults.removeObject(forKey: pendingKey)
+    }
+
+    private func loadReceivedIDs() -> [String] {
+        let data = (try? secureStoreRead(account: receivedKey)) ?? defaults.data(forKey: receivedKey)
+        guard let data, let ids = try? JSONDecoder().decode([String].self, from: data) else {
+            return defaults.stringArray(forKey: receivedKey) ?? []
+        }
+        if (try? secureStoreWrite(data, account: receivedKey)) != nil { defaults.removeObject(forKey: receivedKey) }
+        return ids
+    }
+
+    private func saveReceivedIDs(_ ids: [String]) throws {
+        try secureStoreWrite(JSONEncoder().encode(ids), account: receivedKey)
+        defaults.removeObject(forKey: receivedKey)
+    }
+
+    private func secureStoreRead(account: String) throws -> Data? {
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: "org.nexora.mesh.private-state.v1",
+            kSecAttrAccount as String: account,
+            kSecAttrAccessible as String: kSecAttrAccessibleWhenUnlockedThisDeviceOnly,
+            kSecReturnData as String: true
+        ]
+        var item: CFTypeRef?
+        let result = SecItemCopyMatching(query as CFDictionary, &item)
+        if result == errSecItemNotFound { return nil }
+        guard result == errSecSuccess, let data = item as? Data else { throw MeshSecureChatError.keyStore }
+        return data
+    }
+
+    private func secureStoreWrite(_ data: Data, account: String) throws {
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: "org.nexora.mesh.private-state.v1",
+            kSecAttrAccount as String: account
+        ]
+        let update: [String: Any] = [
+            kSecValueData as String: data,
+            kSecAttrAccessible as String: kSecAttrAccessibleWhenUnlockedThisDeviceOnly
+        ]
+        let result = SecItemUpdate(query as CFDictionary, update as CFDictionary)
+        if result == errSecItemNotFound {
+            var insert = query
+            update.forEach { insert[$0.key] = $0.value }
+            guard SecItemAdd(insert as CFDictionary, nil) == errSecSuccess else { throw MeshSecureChatError.keyStore }
+        } else if result != errSecSuccess {
+            throw MeshSecureChatError.keyStore
+        }
     }
 
 
