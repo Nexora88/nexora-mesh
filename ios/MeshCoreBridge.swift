@@ -16,6 +16,26 @@ enum MeshCoreBridge {
         guard result == 0 else { throw MeshCoreError.invalidEnvelope(Int32(result)) }
     }
 
+    static func recommendedScanIntervalSeconds(
+        batteryPercent: UInt8, charging: Bool, lowPowerMode: Bool,
+        appForeground: Bool, recentlyConnected: Bool, urgentPending: Bool
+    ) -> UInt64 {
+        nm_relay_scan_interval_seconds(
+            batteryPercent, charging ? 1 : 0, lowPowerMode ? 1 : 0,
+            appForeground ? 1 : 0, recentlyConnected ? 1 : 0, urgentPending ? 1 : 0
+        )
+    }
+
+    static func mayRelay(
+        optedIn: Bool, batteryPercent: UInt8, charging: Bool,
+        lowPowerMode: Bool, appForeground: Bool
+    ) -> Bool {
+        nm_relay_may_forward(
+            optedIn ? 1 : 0, batteryPercent, charging ? 1 : 0,
+            lowPowerMode ? 1 : 0, appForeground ? 1 : 0
+        ) == 1
+    }
+
     static func forward(_ envelope: Data, nowUnixSeconds: UInt64) throws -> Data {
         try validate(envelope)
         var output = Data(count: envelope.count)
