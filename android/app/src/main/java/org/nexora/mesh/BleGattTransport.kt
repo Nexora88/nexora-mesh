@@ -21,6 +21,8 @@ import android.bluetooth.le.AdvertiseSettings
 import android.bluetooth.le.AdvertiseData
 import android.content.Context
 import android.os.Build
+import android.os.BatteryManager
+import android.os.PowerManager
 import android.os.ParcelUuid
 import java.io.ByteArrayOutputStream
 import java.nio.ByteBuffer
@@ -72,6 +74,12 @@ class BleGattTransport(context: Context) {
         if (!a.isEnabled) return status("Önce Bluetooth'u aç.")
         startGattServer()
         startScan()
+    }
+
+    /** Explicitly stop discovery when the user leaves the nearby-devices workflow. */
+    fun stopDiscovery() {
+        try { adapter?.bluetoothLeScanner?.stopScan(scanCallback) } catch (_: Exception) {}
+        status("BLE taraması durduruldu; arka planda sürekli tarama yapılmıyor.")
     }
 
     fun stop() {
@@ -175,8 +183,12 @@ class BleGattTransport(context: Context) {
 
     private fun startAdvertising() {
         val advertiser = adapter?.bluetoothLeAdvertiser ?: return status("BLE yayıncısı kullanılamıyor.")
-        val settings = AdvertiseSettings.Builder().setAdvertiseMode(AdvertiseSettings.ADVERTISE_MODE_LOW_LATENCY)
-            .setConnectable(true).setTimeout(0).setTxPowerLevel(AdvertiseSettings.ADVERTISE_TX_POWER_MEDIUM).build()
+        val settings = AdvertiseSettings.Builder()
+            .setAdvertiseMode(AdvertiseSettings.ADVERTISE_MODE_LOW_POWER)
+            .setConnectable(true)
+            .setTimeout(0)
+            .setTxPowerLevel(AdvertiseSettings.ADVERTISE_TX_POWER_LOW)
+            .build()
         val data = AdvertiseData.Builder().setIncludeDeviceName(false)
             .addServiceUuid(ParcelUuid(SERVICE_UUID)).build()
         advertiser.startAdvertising(settings, data, advertiseCallback)
@@ -185,8 +197,27 @@ class BleGattTransport(context: Context) {
     private fun startScan() {
         val scanner = adapter?.bluetoothLeScanner ?: return status("BLE tarayıcısı kullanılamıyor.")
         val filter = ScanFilter.Builder().setServiceUuid(ParcelUuid(SERVICE_UUID)).build()
-        scanner.startScan(listOf(filter), ScanSettings.Builder().setScanMode(ScanSettings.SCAN_MODE_LOW_LATENCY).build(), scanCallback)
-        status("Nexora Mesh BLE cihazları aranıyor.")
+        val battery = app.getSystemService(Context.BATTERY_SERVICE) as BatteryManager
+        val batteryPercent = battery.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY).coerceIn(0, 100)
+        val power = app.getSystemService(Context.POWER_SERVICE) as PowerManager
+        val lowPower = power.isPowerSaveMode
+        val interval = runCatching {
+            NativeMesh.recommendedScanIntervalSeconds(
+                batteryPercent, charging = false, lowPowerMode = lowPower,
+                appForeground = true, recentlyConnected = false, urgentPending = false
+            )
+        }.getOrDefault(45L)
+        val scanMode = if (lowPower || batteryPercent <= 15) {
+            ScanSettings.SCAN_MODE_LOW_POWER
+        } else {
+            ScanSettings.SCAN_MODE_BALANCED
+        }
+        val settings = ScanSettings.Builder()
+            .setScanMode(scanMode)
+            .setReportDelay(interval.coerceAtMost(60L) * 1000L)
+            .build()
+        scanner.startScan(listOf(filter), settings, scanCallback)
+        status("Nexora Mesh BLE taraması güç tasarrufu modunda çalışıyor (önerilen aralık: ${interval}s).")
     }
 
     private val scanCallback = object : ScanCallback() {
