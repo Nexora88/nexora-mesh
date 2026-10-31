@@ -59,3 +59,25 @@ extern "C" JNIEXPORT jbyteArray JNICALL
 Java_org_nexora_mesh_NativeMesh_forward(JNIEnv* env, jclass, jbyteArray input, jlong now_unix) {
     return forward_bytes(env, input, now_unix);
 }
+
+extern "C" JNIEXPORT jlong JNICALL
+Java_org_nexora_mesh_NativeMesh_recommendedScanIntervalSeconds(
+    JNIEnv*, jclass, jint battery, jboolean charging, jboolean low_power,
+    jboolean foreground, jboolean recently_connected, jboolean urgent_pending) {
+    const auto value = nm_relay_scan_interval_seconds(
+        static_cast<std::uint8_t>(battery < 0 ? 0 : battery > 100 ? 100 : battery),
+        charging ? 1 : 0, low_power ? 1 : 0, foreground ? 1 : 0,
+        recently_connected ? 1 : 0, urgent_pending ? 1 : 0);
+    return static_cast<jlong>(value);
+}
+
+extern "C" JNIEXPORT jboolean JNICALL
+Java_org_nexora_mesh_NativeMesh_mayRelay(
+    JNIEnv*, jclass, jboolean opted_in, jint battery, jboolean charging,
+    jboolean low_power, jboolean foreground) {
+    const auto value = nm_relay_may_forward(
+        opted_in ? 1 : 0,
+        static_cast<std::uint8_t>(battery < 0 ? 0 : battery > 100 ? 100 : battery),
+        charging ? 1 : 0, low_power ? 1 : 0, foreground ? 1 : 0);
+    return value == 1 ? JNI_TRUE : JNI_FALSE;
+}
