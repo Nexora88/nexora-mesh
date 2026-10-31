@@ -89,6 +89,7 @@ struct MeshRootView: View {
         .onAppear {
             relayOptIn = relayStore.isOptedIn
             bleTransport.onPacket = { packet in
+                if relayStore.isOptedIn { _ = relayStore.enqueue(packet) }
                 DispatchQueue.main.async { secureChat.receive(packet) }
             }
         }
