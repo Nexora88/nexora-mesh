@@ -6,8 +6,8 @@
 - A relay entry is removed only after the next-hop storage ACK is explicitly reported to the core API. This prevents a disconnect during transfer from silently losing the only copy.
 - Android exposes Rust battery policy through JNI and stores opt-in opaque wire envelopes plus a bounded replay-ID set in app-private preferences.
 - iOS exposes the same Rust scan/relay policy through C-FFI and stores opt-in opaque wire envelopes plus bounded replay history in Keychain.
-- Android BLE scan uses OS low-power/balanced modes and batched scan results; advertising uses low-power mode. Discovery remains user initiated and should be stopped when leaving the nearby-device screen.
-- iOS CoreBluetooth managers use restoration identifiers and the app declares bluetooth-central / bluetooth-peripheral background modes. This allows supported OS-managed wakeups; it does not promise continuous scanning or advertising.
+- Android BLE scan uses Rust-recommended short foreground scan windows, OS low-power/balanced modes and low-power advertising. The Activity stops BLE scanning and advertising on ON_STOP; no invisible Android background scanner is claimed.
+- iOS foreground discovery uses short scan windows based on the shared Rust cadence policy. When the app moves to background, an active CoreBluetooth scan is left to iOS background scheduling; returning to foreground restores the duty-cycled scan. CoreBluetooth managers use restoration identifiers and the app declares bluetooth-central / bluetooth-peripheral background modes. This allows supported OS-managed wakeups; it does not promise continuous scanning or advertising.
 - The web UI now detects the Tauri desktop host and can invoke native desktop BLE discovery start/stop/list commands. The browser/PWA mode continues to report that native radio access is unavailable.
 - A Tauri 2 desktop shell and btleplug-based BLE discovery host are scaffolded for Windows/macOS/Linux packaging.
 
