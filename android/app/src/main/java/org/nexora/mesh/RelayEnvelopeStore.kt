@@ -42,6 +42,10 @@ class RelayEnvelopeStore(context: Context) {
                     if (id.matches(Regex("[0-9a-f]{32}"))) seen[id] = Unit
                 }
             }
+            if (!prefs.getBoolean(OPT_IN_KEY, false)) {
+                queue.clear()
+                persistAll()
+            }
         }
     }
 
@@ -63,10 +67,15 @@ class RelayEnvelopeStore(context: Context) {
         if (runCatching { NativeMesh.validate(envelope) }.getOrDefault(-1) != 0) return false
         val id = envelope.copyOfRange(3, 19).joinToString("") { "%02x".format(it) }
         if (seen.containsKey(id) || queue.containsKey(id) || queue.size >= MAX_ITEMS) return false
+        val previousSeen = seen.keys.toList()
         queue[id] = envelope.copyOf()
         seen[id] = Unit
         while (seen.size > MAX_SEEN) seen.remove(seen.keys.first())
-        persistAll()
+        if (persistAll()) return true
+        queue.remove(id)
+        seen.clear()
+        previousSeen.forEach { seen[it] = Unit }
+        false
     }
 
     /**
@@ -81,8 +90,11 @@ class RelayEnvelopeStore(context: Context) {
 
     /** Call only after the next device confirms durable acceptance of this message ID. */
     fun acknowledgeStoredByNextHop(messageIdHex: String): Boolean = synchronized(lock) {
-        if (queue.remove(messageIdHex.lowercase()) == null) return false
-        persistAll()
+        val id = messageIdHex.lowercase()
+        val removed = queue.remove(id) ?: return false
+        if (persistAll()) return true
+        queue[id] = removed
+        false
     }
 
     fun pendingCount(): Int = synchronized(lock) { queue.size }
