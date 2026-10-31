@@ -84,6 +84,7 @@ private fun MeshApp() {
     var pendingContact by remember { mutableStateOf<ContactQr.Contact?>(null) }
     var secureChannelActive by remember { mutableStateOf(false) }
     val messages = remember { mutableStateListOf<BluetoothChatManager.ChatMessage>() }
+    val relayOptInState = rememberUpdatedState(relayOptIn)
 
     DisposableEffect(manager) {
         val listener = object : BluetoothChatManager.Listener {
@@ -124,7 +125,7 @@ private fun MeshApp() {
             override fun onPacket(packet: ByteArray) {
                 // GATT packet boundaries feed the same QR-trust, proof-handshake, and AEAD verifier
                 // used by the existing chat protocol. Receiving a packet alone never marks a peer trusted.
-                if (relayOptIn && relayStore.enqueue(packet)) {
+                if (relayOptInState.value && relayStore.enqueue(packet)) {
                     bleStatus = "Şifreli Rust zarfı yerel relay kuyruğuna kaydedildi."
                 }
                 manager.receiveBlePacket(packet)
