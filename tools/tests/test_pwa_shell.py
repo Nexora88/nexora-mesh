@@ -27,6 +27,24 @@ class PwaShellTests(unittest.TestCase):
         self.assertIn("Gönderilmedi", js)
         self.assertIn("verified:false", js)
 
+    def test_desktop_native_ble_controls_are_not_faked_in_browser(self):
+        html = (WEB / "index.html").read_text()
+        js = (WEB / "app.js").read_text()
+        self.assertIn('id="desktop-scan"', html)
+        self.assertIn('id="desktop-stop"', html)
+        self.assertIn("window.__TAURI__?.core?.invoke", js)
+        self.assertIn("Native BLE yalnızca kurulu", js)
+
+    def test_tauri_desktop_shell_declares_local_frontend_and_ble_host(self):
+        desktop = ROOT / "desktop" / "src-tauri"
+        config = json.loads((desktop / "tauri.conf.json").read_text())
+        cargo = (desktop / "Cargo.toml").read_text()
+        rust = (desktop / "src" / "lib.rs").read_text()
+        self.assertEqual(config["build"]["frontendDist"], "../../web")
+        self.assertIn('btleplug = "0.11"', cargo)
+        self.assertIn("start_ble_discovery", rust)
+        self.assertIn("nearby_ble_devices", rust)
+
     def test_service_worker_caches_offline_shell(self):
         worker = (WEB / "sw.js").read_text()
         self.assertIn("addAll(ASSETS)", worker)
