@@ -13,4 +13,12 @@ object NativeMesh {
 
     external fun validate(envelope: ByteArray): Int
     external fun forward(envelope: ByteArray, nowUnixSeconds: Long): ByteArray
+    external fun recommendedScanIntervalSeconds(
+        batteryPercent: Int, charging: Boolean, lowPowerMode: Boolean,
+        appForeground: Boolean, recentlyConnected: Boolean, urgentPending: Boolean
+    ): Long
+    external fun mayRelay(
+        optedIn: Boolean, batteryPercent: Int, charging: Boolean,
+        lowPowerMode: Boolean, appForeground: Boolean
+    ): Boolean
 }
