@@ -71,6 +71,7 @@ private fun MeshApp() {
     val context = androidx.compose.ui.platform.LocalContext.current
     val manager = remember { BluetoothChatManager(context) }
     val bleTransport = remember { BleGattTransport(context) }
+    val lifecycleOwner = context as? androidx.lifecycle.LifecycleOwner
     val relayStore = remember { RelayEnvelopeStore(context) }
     var relayOptIn by remember { mutableStateOf(relayStore.isOptedIn()) }
     var blePeers by remember { mutableStateOf<List<BleGattTransport.Peer>>(emptyList()) }
@@ -116,6 +117,18 @@ private fun MeshApp() {
     val blePermissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { grants ->
         if (grants.values.all { it }) bleTransport.start()
         else bleStatus = "BLE keşfi/yayını için Bluetooth izinleri verilmedi."
+    }
+
+    DisposableEffect(lifecycleOwner, bleTransport) {
+        val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
+            if (event == androidx.lifecycle.Lifecycle.Event.ON_STOP) {
+                // No Android background BLE scanning/advertising without a dedicated,
+                // user-visible foreground-service design.
+                bleTransport.stop()
+            }
+        }
+        lifecycleOwner?.lifecycle?.addObserver(observer)
+        onDispose { lifecycleOwner?.lifecycle?.removeObserver(observer) }
     }
 
     DisposableEffect(bleTransport) {
