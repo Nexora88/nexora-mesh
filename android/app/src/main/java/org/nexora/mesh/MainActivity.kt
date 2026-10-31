@@ -71,6 +71,8 @@ private fun MeshApp() {
     val context = androidx.compose.ui.platform.LocalContext.current
     val manager = remember { BluetoothChatManager(context) }
     val bleTransport = remember { BleGattTransport(context) }
+    val relayStore = remember { RelayEnvelopeStore(context) }
+    var relayOptIn by remember { mutableStateOf(relayStore.isOptedIn()) }
     var blePeers by remember { mutableStateOf<List<BleGattTransport.Peer>>(emptyList()) }
     var bleStatus by remember { mutableStateOf("BLE taşıması henüz başlatılmadı.") }
     var selectedTab by remember { mutableIntStateOf(0) }
@@ -122,6 +124,9 @@ private fun MeshApp() {
             override fun onPacket(packet: ByteArray) {
                 // GATT packet boundaries feed the same QR-trust, proof-handshake, and AEAD verifier
                 // used by the existing chat protocol. Receiving a packet alone never marks a peer trusted.
+                if (relayOptIn && relayStore.enqueue(packet)) {
+                    bleStatus = "Şifreli Rust zarfı yerel relay kuyruğuna kaydedildi."
+                }
                 manager.receiveBlePacket(packet)
             }
             override fun onConnected(peerLabel: String) {
@@ -219,6 +224,12 @@ private fun MeshApp() {
                         bleStatus = bleStatus,
                         onBleStart = ::startBleOrRequest,
                         onBleConnect = { peer -> bleTransport.connect(peer) },
+                        relayOptIn = relayOptIn,
+                        relayQueueCount = relayStore.pendingCount(),
+                        onRelayOptInChanged = { enabled ->
+                            relayStore.setOptIn(enabled)
+                            relayOptIn = enabled
+                        },
                         onDevice = { peer ->
                             activePeer = peer
                             if (peer.bonded) manager.connect(peer.device) else manager.pair(peer.device)
@@ -311,6 +322,9 @@ private fun DevicesScreen(
     bleStatus: String,
     onBleStart: () -> Unit,
     onBleConnect: (BleGattTransport.Peer) -> Unit,
+    relayOptIn: Boolean,
+    relayQueueCount: Int,
+    onRelayOptInChanged: (Boolean) -> Unit,
     onDevice: (BluetoothChatManager.Peer) -> Unit
 ) {
     Column(Modifier.fillMaxSize().padding(horizontal = 18.dp)) {
@@ -341,6 +355,16 @@ private fun DevicesScreen(
         Text("BLE keşif/bağlantı taşıması. Bu ekran henüz sohbet metnini BLE zarfına bağlamaz.", color = MeshMuted, fontSize = 12.sp)
         Button(onClick = onBleStart, modifier = Modifier.fillMaxWidth()) { Text("BLE taşımasını başlat") }
         Text(bleStatus, color = MeshGreen, fontSize = 12.sp)
+        Row(
+            Modifier.fillMaxWidth().background(MeshSurface, RoundedCornerShape(14.dp)).padding(12.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(Modifier.weight(1f)) {
+                Text("Store-and-forward izni", color = Color.White, fontWeight = FontWeight.SemiBold)
+                Text("Yalnızca doğrulanmış Rust zarflarını cihazda saklar. Canlı çoklu atlama henüz etkin değil. Kuyruk: $relayQueueCount", color = MeshMuted, fontSize = 11.sp)
+            }
+            Switch(checked = relayOptIn, onCheckedChange = onRelayOptInChanged)
+        }
         LazyColumn(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             items(blePeers, key = { it.device.address }) { peer ->
                 Row(
