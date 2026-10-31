@@ -20,7 +20,7 @@ async fn start_ble_discovery(state: State<'_, RadioState>) -> Result<String, Str
     let adapter = adapters.into_iter().next().ok_or("No BLE adapter available")?;
     adapter.start_scan(ScanFilter::default()).await.map_err(|e| e.to_string())?;
     let label = adapter.adapter_info().await.unwrap_or_else(|_| "BLE adapter".into());
-    *state.0.lock().map_err(|e| e.to_string())? = Some(adapter);
+    *state.0.lock().await = Some(adapter);
     Ok(format!("Discovery started on {label}"))
 }
 
