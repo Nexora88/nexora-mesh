@@ -37,8 +37,8 @@ final class MeshRelayStore {
     func enqueue(_ envelope: Data) -> Bool {
         lock.lock()
         defer { lock.unlock() }
-        guard isOptedIn, envelope.count >= 49, envelope.count <= MeshCoreBridge.maxEnvelopeBytes,
-              (try? MeshCoreBridge.validate(envelope)) != nil else { return false }
+        guard isOptedIn, envelope.count >= 49, envelope.count <= MeshCoreBridge.maxEnvelopeBytes else { return false }
+        do { try MeshCoreBridge.validate(envelope) } catch { return false }
         let id = envelope[3..<19].map { String(format: "%02x", $0) }.joined()
         guard var queue = try? loadQueue(), !queue.contains(where: { $0.id == id }),
               queue.count < maximumItems else { return false }
@@ -59,7 +59,7 @@ final class MeshRelayStore {
     func peekForNextHop(nowUnixSeconds: UInt64) -> (id: String, envelope: Data)? {
         lock.lock()
         defer { lock.unlock() }
-        guard isOptedIn, let item = try? loadQueue().first,
+        guard isOptedIn, let items = try? loadQueue(), let item = items.first,
               let forwarded = try? MeshCoreBridge.forward(item.envelope, nowUnixSeconds: nowUnixSeconds)
         else { return nil }
         return (item.id, forwarded)
