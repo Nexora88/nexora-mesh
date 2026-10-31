@@ -1,7 +1,7 @@
 use btleplug::api::{Central, Manager as _, Peripheral as _, ScanFilter};
 use btleplug::platform::{Adapter, Manager};
 use serde::Serialize;
-use std::sync::Mutex;
+use tokio::sync::Mutex;
 use tauri::State;
 
 struct RadioState(Mutex<Option<Adapter>>);
@@ -26,8 +26,8 @@ async fn start_ble_discovery(state: State<'_, RadioState>) -> Result<String, Str
 
 #[tauri::command]
 async fn stop_ble_discovery(state: State<'_, RadioState>) -> Result<(), String> {
-    let adapter = state.0.lock().map_err(|e| e.to_string())?.clone();
-    if let Some(adapter) = adapter {
+    let guard = state.0.lock().await;
+    if let Some(adapter) = guard.as_ref() {
         adapter.stop_scan().await.map_err(|e| e.to_string())?;
     }
     Ok(())
@@ -35,8 +35,8 @@ async fn stop_ble_discovery(state: State<'_, RadioState>) -> Result<(), String> 
 
 #[tauri::command]
 async fn nearby_ble_devices(state: State<'_, RadioState>) -> Result<Vec<NearbyDevice>, String> {
-    let adapter = state.0.lock().map_err(|e| e.to_string())?.clone()
-        .ok_or("Start discovery first")?;
+    let guard = state.0.lock().await;
+    let adapter = guard.as_ref().ok_or("Start discovery first")?;
     let peripherals = adapter.peripherals().await.map_err(|e| e.to_string())?;
     let mut devices = Vec::new();
     for peripheral in peripherals {
