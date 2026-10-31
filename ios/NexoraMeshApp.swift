@@ -49,6 +49,8 @@ struct MeshRootView: View {
     @State private var qrPayloadInput = ""
     @State private var qrTrustStatus = ""
     @State private var showQRScanner = false
+    @State private var relayStore = MeshRelayStore()
+    @State private var relayOptIn = false
 
 
     var body: some View {
@@ -85,6 +87,7 @@ struct MeshRootView: View {
         }
         .preferredColorScheme(.dark)
         .onAppear {
+            relayOptIn = relayStore.isOptedIn
             bleTransport.onPacket = { packet in
                 DispatchQueue.main.async { secureChat.receive(packet) }
             }
@@ -222,7 +225,20 @@ struct MeshRootView: View {
             Text("Güvenlik ve afet iletişimi").font(.largeTitle.bold()).foregroundStyle(.white)
             infoCard("Afetlerde dayanıklılık", "Orman yangını, deprem, sel ve dağ arama-kurtarma ekipleri için internet kesilse de yerel iletişim hedefleniyor. Bu uygulama şu an acil durum haberleşme aracı değildir.", symbol: "cross.case")
             infoCard("Menzil", "Bluetooth tek başına uzak mesafeyi garanti etmez. Daha geniş kapsama için Wi-Fi Direct ve izinli ara cihazlar üzerinden çok atlamalı aktarım araştırılacak.", symbol: "point.3.connected.trianglepath.dotted")
-            infoCard("Platformlar", "Android ilk geliştirme hedefi. Bu SwiftUI dosyası Apple platformları için başlangıç arayüzüdür; Xcode projesi, radyo katmanı ve iOS cihaz testleri ayrıca tamamlanmalıdır.", symbol: "iphone.and.arrow.forward")
+            infoCard("Platformlar", "iOS arka plan BLE davranışı iOS tarafından zamanlanır. Uygulama sürekli tarama veya kesintisiz yayın garantisi veremez.", symbol: "iphone.and.arrow.forward")
+            VStack(alignment: .leading, spacing: 10) {
+                Toggle(isOn: $relayOptIn) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Bu cihazın şifreli paketleri saklamasına izin ver").foregroundStyle(.white)
+                        Text("Yalnızca doğrulanmış Rust zarfları Keychain'de saklanır. Canlı A→B→C aktarımı henüz tamamlanmadı. Kuyruk: \\(relayStore.pendingCount())")
+                            .font(.caption).foregroundStyle(MeshPalette.muted)
+                    }
+                }
+                .tint(MeshPalette.green)
+                .onChange(of: relayOptIn) { _, enabled in relayStore.isOptedIn = enabled }
+            }
+            .padding(16)
+            .background(MeshPalette.surface, in: RoundedRectangle(cornerRadius: 18))
             VStack(alignment: .leading, spacing: 10) {
                 Text("Kimlik ve QR güveni").font(.headline).foregroundStyle(.white)
                 Text("Bu cihazın QR içeriğini karşı tarafa aktar. Diğer kişinin QR içeriğini buraya yapıştırıp parmak izini doğrulayarak güvenilir kişi olarak ekle.")
