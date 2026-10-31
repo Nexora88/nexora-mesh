@@ -32,6 +32,7 @@ pub enum RelayDecision {
     DropHopLimit,
     DropOversized,
     DropRelayDisabled,
+    DropQueueFull,
 }
 
 impl Envelope {
@@ -186,7 +187,7 @@ impl RelayQueue {
             return RelayDecision::DropDuplicate;
         }
         if self.queue.len() >= self.capacity {
-            return RelayDecision::DropOversized;
+            return RelayDecision::DropQueueFull;
         }
         self.remember(envelope.message_id);
         self.queue.push_back(envelope);
@@ -243,13 +244,35 @@ impl RelayQueue {
         restored
     }
 
-    pub fn pop_next(&mut self, now_unix: u64) -> Option<Envelope> {
-        while let Some(envelope) = self.queue.pop_front() {
-            if envelope.expires_at_unix > now_unix && envelope.hops_remaining > 0 {
-                return Some(envelope);
-            }
+    /// Remove expired entries without disturbing the order of live envelopes.
+    pub fn purge_expired(&mut self, now_unix: u64) -> usize {
+        let before = self.queue.len();
+        self.queue.retain(|item| item.expires_at_unix > now_unix && item.hops_remaining > 0);
+        before - self.queue.len()
+    }
+
+    /// Inspect the next hop-adjusted copy without deleting the durable original.
+    /// The caller must retain the original until the next relay explicitly ACKs storage.
+    pub fn next_for_forwarding(&mut self, now_unix: u64) -> Option<Envelope> {
+        self.purge_expired(now_unix);
+        self.queue.front().and_then(|item| item.forwarded(now_unix))
+    }
+
+    /// Remove an item only after the next hop confirms it durably accepted the envelope.
+    pub fn acknowledge_hop(&mut self, message_id: [u8; 16]) -> bool {
+        if let Some(index) = self.queue.iter().position(|item| item.message_id == message_id) {
+            self.queue.remove(index);
+            true
+        } else {
+            false
         }
-        None
+    }
+
+    /// Legacy dequeue helper for deterministic core tests. Native transports should use
+    /// next_for_forwarding + acknowledge_hop to avoid losing messages on disconnect.
+    pub fn pop_next(&mut self, now_unix: u64) -> Option<Envelope> {
+        self.purge_expired(now_unix);
+        self.queue.pop_front()
     }
 
     fn remember(&mut self, id: [u8; 16]) {
@@ -339,7 +362,7 @@ mod tests {
         );
         assert_eq!(
             queue.enqueue(envelope(2, 3, 100), 1),
-            RelayDecision::DropOversized
+            RelayDecision::DropQueueFull
         );
     }
 
@@ -351,6 +374,35 @@ mod tests {
         queue.enqueue(envelope(2, 3, 50), 1);
         assert_eq!(queue.pop_next(10).unwrap().message_id, [2; 16]);
         assert!(queue.is_empty());
+    }
+
+    #[test]
+    fn relay_keeps_original_until_next_hop_acknowledges_storage() {
+        let original = envelope(44, 3, 100);
+        let mut queue = RelayQueue::new(4, 8);
+        queue.set_relay_enabled(true);
+        assert_eq!(queue.enqueue(original.clone(), 1), RelayDecision::Forward);
+
+        let forwarded = queue.next_for_forwarding(2).unwrap();
+        assert_eq!(forwarded.hops_remaining, 2);
+        assert_eq!(forwarded.ciphertext, original.ciphertext);
+        assert_eq!(queue.len(), 1, "in-flight item must remain durable until hop ACK");
+
+        assert!(!queue.acknowledge_hop([99; 16]));
+        assert_eq!(queue.len(), 1);
+        assert!(queue.acknowledge_hop(original.message_id));
+        assert!(queue.is_empty());
+    }
+
+    #[test]
+    fn purge_expired_removes_only_expired_items() {
+        let mut queue = RelayQueue::new(4, 8);
+        queue.set_relay_enabled(true);
+        queue.enqueue(envelope(1, 3, 5), 1);
+        queue.enqueue(envelope(2, 3, 50), 1);
+        assert_eq!(queue.purge_expired(5), 1);
+        assert_eq!(queue.len(), 1);
+        assert_eq!(queue.next_for_forwarding(6).unwrap().message_id, [2; 16]);
     }
 
     #[test]
