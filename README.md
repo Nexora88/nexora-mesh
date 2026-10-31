@@ -2,7 +2,7 @@
 
 **An offline-first messenger project for Android and Apple platforms, designed with resilient communication in mind.** The long-term goal is a trustworthy messenger that can help people communicate when connectivity is disrupted by wildfires, earthquakes, floods, or mountain search-and-rescue operations.
 
-> **Honest status:** Android Bluetooth Classic chat remains the current live chat path. This branch adds a Rust C ABI, Android JNI/CMake bridge, Android BLE GATT discovery/connection prototype, iOS CoreBluetooth GATT source, a Swift C ABI wrapper, and an XCFramework build script. BLE is not yet wired end-to-end to the QR-gated encrypted chat protocol. Android CI for the new native bridge is still running; the iOS sources have not been built in Xcode here. No physical Android–iPhone or three-device relay tests have been performed. Audio/video calls and a custom codec are not implemented. This is not ready for emergency use.
+> **Honest status:** Android Bluetooth Classic remains the current direct chat path. Android BLE and iOS CoreBluetooth transports exist as prototypes. The Rust relay core now supports bounded opaque-envelope storage, hop decrement, expiry, replay filtering, opt-in and ACK-retained queue APIs; Android SharedPreferences and iOS Keychain relay stores are added. Battery policy is exposed through Android JNI and iOS C-FFI. iOS CoreBluetooth state restoration and supported background modes are declared, but the OS does not guarantee continuous background radio work. A Tauri desktop shell now exposes BLE discovery/listing only. The PWA remains a management console. Live multi-hop forwarding, hop STORE_ACK/retry, desktop encrypted chat, physical interoperability and independent security review are not complete. This is not ready for emergency use.
 
 ## Product vision
 
@@ -57,7 +57,7 @@ Do not describe unverified source code as a working tested feature.
 
 ## Range limitations
 
-Bluetooth does not provide unlimited range. Hardware, terrain, obstacles, interference, and battery state all matter. Multi-hop relaying may extend the paths a message can travel, but cannot guarantee delivery or a particular distance. Relaying is not implemented yet.
+Bluetooth does not provide unlimited range. Hardware, terrain, obstacles, interference, OS scheduling, and battery state all matter. Multi-hop relaying may extend the paths a message can travel, but cannot guarantee delivery or a particular distance. The current store-forward queue and Rust routing APIs are groundwork; live A→B→C radio forwarding and authenticated hop acknowledgements remain incomplete.
 
 ## Security principles
 
