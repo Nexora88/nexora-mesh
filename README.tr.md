@@ -115,3 +115,5 @@ Başarılı bir GitHub Actions çalışmasının ardından depo içindeki **Acti
 - `nexora-mesh-pwa`: kurulabilir web kabuğu kaynak paketi
 
 Artifact'lar yalnızca ilgili iş akışı başarılı olursa oluşur. Android debug APK test içindir; imzalı üretim sürümü değildir. iOS Simulator paketi gerçek iPhone'a kurulamaz. Fiziksel iPhone dağıtımı için Apple imzalama/provisioning ve ayrıca gerçek cihaz testi gerekir.
+
+Android CI, Google Android SDK lisansını otomatik kabul etmez. Derlemeyi etkinleştirmek için depo sahibi veya ebeveyn/vasi lisansı inceleyip kabul ettikten sonra `ANDROID_SDK_LICENSES_ACCEPTED=true` depo değişkenini ayarlamalıdır. Bu değişken yoksa iş akışı lisans kabul etmeden durur.

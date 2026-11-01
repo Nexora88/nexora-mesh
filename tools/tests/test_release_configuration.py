@@ -43,6 +43,9 @@ class ReleaseConfigurationTests(unittest.TestCase):
         ci = self.read(".github/workflows/ci.yml")
         release = self.read(".github/workflows/android-release.yml")
         for workflow in (ci, release):
+            self.assertIn("Require Android SDK license approval", workflow)
+            self.assertIn("ANDROID_SDK_LICENSES_ACCEPTED", workflow)
+            self.assertIn("accept-android-sdk-licenses:", workflow)
             self.assertIn("cargo ndk", workflow)
             self.assertIn("testDebugUnitTest", workflow)
             self.assertIn("assembleDebug", workflow)

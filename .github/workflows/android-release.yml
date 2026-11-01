@@ -24,12 +24,22 @@ jobs:
           distribution: temurin
           java-version: "17"
 
-      - uses: android-actions/setup-android@v3
+      - name: Require Android SDK license approval
+        env:
+          ANDROID_SDK_LICENSES_ACCEPTED: ${{ vars.ANDROID_SDK_LICENSES_ACCEPTED }}
+        run: |
+          if [ "$ANDROID_SDK_LICENSES_ACCEPTED" != "true" ]; then
+            echo "::error::A parent/guardian or authorized repository owner must review the Android SDK license and set ANDROID_SDK_LICENSES_ACCEPTED=true before this build."
+            exit 1
+          fi
+
+      - uses: android-actions/setup-android@v4
         with:
-          packages: platform-tools
+          accept-android-sdk-licenses: ${{ vars.ANDROID_SDK_LICENSES_ACCEPTED }}
+          packages: ''
 
       - name: Install Android SDK components
-        run: sdkmanager "platforms;android-35" "build-tools;35.0.0" "ndk;27.2.12479018" "cmake;3.22.1"
+        run: sdkmanager "platform-tools" "platforms;android-35" "build-tools;35.0.0" "ndk;27.2.12479018" "cmake;3.22.1"
 
       - name: Install cargo-ndk
         run: cargo install cargo-ndk --locked
