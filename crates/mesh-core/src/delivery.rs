@@ -5,6 +5,7 @@
 //! public key, message ciphertext, or a global application key here.
 use hmac::{Hmac, Mac};
 use sha2::Sha256;
+use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet, VecDeque};
 
 type HmacSha256 = Hmac<Sha256>;
@@ -188,18 +189,17 @@ impl DeliveryTracker {
     }
 
     pub fn track(&mut self, message_id: [u8; 16], now_unix: u64) -> bool {
-        if self.records.contains_key(&message_id) {
-            return false;
+        match self.records.entry(message_id) {
+            Entry::Vacant(entry) => {
+                entry.insert(DeliveryRecord {
+                    message_id,
+                    attempts: 0,
+                    next_retry_at_unix: now_unix,
+                });
+                true
+            }
+            Entry::Occupied(_) => false,
         }
-        self.records.insert(
-            message_id,
-            DeliveryRecord {
-                message_id,
-                attempts: 0,
-                next_retry_at_unix: now_unix,
-            },
-        );
-        true
     }
 
     pub fn due(&self, now_unix: u64) -> Vec<DeliveryRecord> {
