@@ -117,7 +117,7 @@ private fun MeshApp() {
             }
             override fun onMediaReceived(fileName: String, savedPath: String, sizeBytes: Int) {
                 peerMessages.add(BluetoothChatManager.ChatMessage(
-                    "Dosya alındı ve bütünlüğü doğrulandı: $fileName ($sizeBytes bayt). Kaydedildi: $savedPath", false
+                    "Dosya alındı ve bütünlüğü doğrulandı: $fileName ($sizeBytes bayt). Uygulama içindeki şifreli kasaya kaydedildi.", false
                 ))
             }
         }

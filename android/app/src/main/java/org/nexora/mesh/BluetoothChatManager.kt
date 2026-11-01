@@ -15,9 +15,7 @@ import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
-import android.os.Environment
 import java.io.File
-import java.io.FileOutputStream
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 import android.util.Base64
@@ -688,11 +686,9 @@ class BluetoothChatManager(context: Context) {
         ) ?: return
         val safeName = (mediaNames[id] ?: name).substringAfterLast('/').substringAfterLast('\\')
             .replace(Regex("[^A-Za-z0-9._-]"), "_").take(80).ifBlank { "media.bin" }
-        val directory = appContext.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS)
-            ?: File(appContext.filesDir, "received-media")
-        check(directory.exists() || directory.mkdirs()) { "Cannot create media directory" }
-        val saved = File(directory, id + "_" + safeName)
-        FileOutputStream(saved).use { it.write(completed) }
+        // Never persist received media as plaintext. The vault uses a non-exportable
+        // Android Keystore AES-GCM key and app-private storage.
+        val saved = MediaVault(appContext).store(id, safeName, completed)
         mediaReassemblers.remove(id)
         mediaNames.remove(id)
         mainHandler.post {
