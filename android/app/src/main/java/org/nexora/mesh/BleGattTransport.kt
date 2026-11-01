@@ -410,6 +410,12 @@ class BleGattTransport(context: Context) {
                 serverPeers.remove(peerId); readyServerPeers.remove(peerId)
                 serverPeerMtus.remove(peerId); serverNotificationQueues.remove(peerId)
                 serverNotificationLocks.remove(peerId); serverNotificationsInFlight.remove(peerId)
+                synchronized(lock) {
+                    if (serverNotificationInFlightPeer == peerId) {
+                        serverNotificationInFlightPeer = null
+                        notificationInFlight = false
+                    }
+                }
                 if (serverPeer?.address == peerId) {
                     serverPeer = serverPeers.values.firstOrNull()
                     serverPeerReady = serverPeer?.address?.let { readyServerPeers.contains(it) } == true
