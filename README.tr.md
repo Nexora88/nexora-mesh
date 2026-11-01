@@ -88,7 +88,7 @@ Ayrıntılar: docs/PRODUCT_VISION.md, docs/PROTOCOL.md, docs/RELAY_ROUTING.md, d
 
 ## Gizlilik ve güvenlik durumu
 
-Android BLE GATT aktarımı ayrı bir prototiptir; QR güveni ve şifreli sohbet protokolüne uçtan uca bağlanmış değildir. Mevcut doğrudan sohbet yolu Bluetooth Classic RFCOMM kullanır. Relay kuyruk/depo bileşenleri henüz kimliği doğrulanmış çok atlamalı teslimat sistemi değildir. iOS yalnızca taşıma katmanıdır; Android↔iOS şifreli sohbet, ileriye dönük gizlilik (forward secrecy), fiziksel birlikte çalışabilirlik testleri ve bağımsız güvenlik incelemesi tamamlanmamıştır. [Gizlilik/güvenlik tehdit modelini](docs/PRIVACY_SECURITY.md) ve [platformlar arası taşıma durumunu](docs/CROSS_PLATFORM_TRANSPORT.md) incele. Bu prototipi acil durum garantisi veya çok hassas iletişim için kullanma.
+Android uygulamasında Bluetooth Classic RFCOMM ve BLE GATT taşıma yolları ile QR güveni sonrası ECDH + AES-GCM sohbet prototipi bulunur. iOS tarafında CoreBluetooth taşıması ve Swift CryptoKit tabanlı sohbet prototipi bulunur. Bu kod yollarının varlığı Android↔iOS gerçek cihazlarda uyumlu ve güvenli teslimatın doğrulandığı anlamına gelmez. Mevcut v1 anahtar türetimi ileriye dönük gizlilik (forward secrecy) sağlamaz; Rust relay kuyruğu da henüz fiziksel radyo üzerinden A→B→C teslimatına bağlanmış değildir. Fiziksel birlikte çalışabilirlik testleri ve bağımsız güvenlik incelemesi tamamlanmamıştır. [Gizlilik/güvenlik tehdit modelini](docs/PRIVACY_SECURITY.md) ve [platformlar arası taşıma durumunu](docs/CROSS_PLATFORM_TRANSPORT.md) incele. Bu prototipi acil durum garantisi veya çok hassas iletişim için kullanma.
 
 
 ## Web, Android ve masaustu paketleri
@@ -100,3 +100,18 @@ Android BLE GATT aktarımı ayrı bir prototiptir; QR güveni ve şifreli sohbet
 - iOS derlemesi macOS/Xcode gerektirir; fiziksel iPhone ve Android cihazlariyla Bluetooth birlikte calisma testi ayri olarak yapilmalidir.
 
 Paketin uretilmis olmasi, Bluetooth aktariminin veya uctan uca guvenligin fiziksel cihazlarda dogrulandigi anlamina gelmez. Actions artefaktlari yalnizca ilgili is akisi basarili tamamlandiginda indirilebilir olur.
+
+
+## Derleme paketlerini indirme
+
+Başarılı bir GitHub Actions çalışmasının ardından depo içindeki **Actions** sekmesinden ilgili çalışmayı açıp **Artifacts** bölümünü kullan:
+
+- `nexora-mesh-android-debug`: test amaçlı Android debug APK
+- `nexora-mesh-desktop-windows`: Windows MSI/NSIS paketleri
+- `nexora-mesh-desktop-linux`: Linux DEB/AppImage paketleri
+- `nexora-mesh-desktop-macos`: macOS DMG/APP paketleri
+- `nexora-mesh-ios-simulator-app`: yalnızca iOS Simulator için derlenmiş uygulama
+- `nexora-mesh-ios-xcframework`: iOS native Rust framework çıktısı
+- `nexora-mesh-pwa`: kurulabilir web kabuğu kaynak paketi
+
+Artifact'lar yalnızca ilgili iş akışı başarılı olursa oluşur. Android debug APK test içindir; imzalı üretim sürümü değildir. iOS Simulator paketi gerçek iPhone'a kurulamaz. Fiziksel iPhone dağıtımı için Apple imzalama/provisioning ve ayrıca gerçek cihaz testi gerekir.
