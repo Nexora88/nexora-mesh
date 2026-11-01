@@ -6,6 +6,23 @@ import MeshCore
 enum MeshCoreBridge {
     static let maxEnvelopeBytes = 256 * 1024
 
+    static func deriveHopKey(sharedSecret: Data, peerA: Data, peerB: Data, epoch: UInt64) -> Data? {
+        guard sharedSecret.count >= 32, peerA.count == 16, peerB.count == 16 else { return nil }
+        var output = Data(count: 32)
+        let result = sharedSecret.withUnsafeBytes { secret in
+            peerA.withUnsafeBytes { a in
+                peerB.withUnsafeBytes { b in
+                    output.withUnsafeMutableBytes { out in
+                        nm_derive_hop_key(secret.bindMemory(to: UInt8.self).baseAddress, secret.count,
+                            a.bindMemory(to: UInt8.self).baseAddress, b.bindMemory(to: UInt8.self).baseAddress,
+                            epoch, out.bindMemory(to: UInt8.self).baseAddress, out.count)
+                    }
+                }
+            }
+        }
+        return result == 32 ? output : nil
+    }
+
     static func validate(_ envelope: Data) throws {
         guard !envelope.isEmpty, envelope.count <= maxEnvelopeBytes else {
             throw MeshCoreError.invalidLength

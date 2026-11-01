@@ -2,9 +2,49 @@
 //! Caller owns all buffers and must pass valid readable/writable memory.
 //! These functions validate/forward opaque encrypted envelopes; they do not encrypt,
 //! authenticate peers, or prove a QR fingerprint.
+use crate::hop_key::derive_hop_key;
 use crate::wire::{decode_envelope, encode_envelope, WireError};
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::slice;
+
+/// Derive a peer- and epoch-bound hop key from authenticated pairwise ECDH output.
+/// # Safety
+/// Pointers must reference readable buffers of the stated lengths; output must be writable.
+#[no_mangle]
+pub unsafe extern "C" fn nm_derive_hop_key(
+    shared_secret: *const u8,
+    secret_len: usize,
+    peer_a: *const u8,
+    peer_b: *const u8,
+    epoch: u64,
+    output: *mut u8,
+    output_capacity: usize,
+) -> isize {
+    if shared_secret.is_null()
+        || peer_a.is_null()
+        || peer_b.is_null()
+        || output.is_null()
+        || output_capacity < 32
+        || secret_len > 4096
+    {
+        return -30;
+    }
+    catch_unwind(AssertUnwindSafe(|| {
+        let secret = slice::from_raw_parts(shared_secret, secret_len);
+        let mut a = [0u8; 16];
+        let mut b = [0u8; 16];
+        a.copy_from_slice(slice::from_raw_parts(peer_a, 16));
+        b.copy_from_slice(slice::from_raw_parts(peer_b, 16));
+        match derive_hop_key(secret, &a, &b, epoch) {
+            Ok(key) => {
+                slice::from_raw_parts_mut(output, 32).copy_from_slice(&key);
+                32
+            }
+            Err(_) => -31,
+        }
+    }))
+    .unwrap_or(-127)
+}
 
 fn error_code(error: WireError) -> i32 {
     match error {

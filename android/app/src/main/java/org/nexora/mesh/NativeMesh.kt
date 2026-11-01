@@ -12,6 +12,7 @@ object NativeMesh {
     }
 
     external fun validate(envelope: ByteArray): Int
+    external fun deriveHopKey(sharedSecret: ByteArray, peerA: ByteArray, peerB: ByteArray, epoch: Long): ByteArray?
     /** Verifies a pairwise-key authenticated 105-byte STORE_ACK through Rust. */
     external fun verifyStoreAck(ack: ByteArray, hopKey: ByteArray, expectedFrom: ByteArray,
         expectedTo: ByteArray, nowUnixSeconds: Long, maxAgeSeconds: Long): Int

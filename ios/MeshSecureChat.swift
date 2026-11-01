@@ -57,6 +57,22 @@ final class MeshSecureChat: ObservableObject {
         restorePendingMessages()
     }
 
+    /// Derive a peer-specific relay ACK key from the authenticated session key.
+    /// Stable node IDs are SHA-256(public-key DER)[0..<16]; epoch rotation is caller-controlled.
+    func deriveCurrentHopKey(epoch: UInt64) -> Data? {
+        guard let sessionKey, isSecure, let fingerprint = remoteFingerprint,
+              let contact = trustedContacts.first(where: {
+                  $0.fingerprint.caseInsensitiveCompare(fingerprint) == .orderedSame
+              }),
+              let localDER = try? localPublicKeyDER(),
+              let remoteDER = Data(base64Encoded: contact.publicKeyBase64) else { return nil }
+        let localID = Data(SHA256.hash(data: localDER).prefix(16))
+        let remoteID = Data(SHA256.hash(data: remoteDER).prefix(16))
+        let keyMaterial = sessionKey.withUnsafeBytes { Data($0) }
+        return MeshCoreBridge.deriveHopKey(sharedSecret: keyMaterial,
+            peerA: localID, peerB: remoteID, epoch: epoch)
+    }
+
     func selectRecipient(_ fingerprint: String?) {
         selectedRecipientFingerprint = fingerprint
     }

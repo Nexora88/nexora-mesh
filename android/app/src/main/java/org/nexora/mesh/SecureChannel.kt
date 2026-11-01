@@ -38,6 +38,10 @@ class SecureChannel private constructor(private val key: ByteArray) {
         return Sealed(nonce, cipher.doFinal(plaintext))
     }
 
+    /** Derive a distinct next-hop STORE_ACK key for this authenticated peer and epoch. */
+    fun deriveHopKey(localNodeId: ByteArray, remoteNodeId: ByteArray, epoch: Long): ByteArray? =
+        NativeMesh.deriveHopKey(key, localNodeId, remoteNodeId, epoch)
+
     fun decrypt(sealed: Sealed, associatedData: ByteArray = byteArrayOf()): ByteArray {
         require(sealed.nonce.size == 12) { "Invalid AES-GCM nonce" }
         val cipher = Cipher.getInstance("AES/GCM/NoPadding")

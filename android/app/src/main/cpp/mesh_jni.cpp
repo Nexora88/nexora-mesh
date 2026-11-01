@@ -44,6 +44,26 @@ jbyteArray forward_bytes(JNIEnv* env, jbyteArray input, jlong now_unix) {
 }
 }  // namespace
 
+extern "C" JNIEXPORT jbyteArray JNICALL
+Java_org_nexora_mesh_NativeMesh_deriveHopKey(JNIEnv* env, jclass, jbyteArray secret,
+    jbyteArray peer_a, jbyteArray peer_b, jlong epoch) {
+    if (secret == nullptr || peer_a == nullptr || peer_b == nullptr || epoch < 0) return nullptr;
+    const jsize secret_len = env->GetArrayLength(secret);
+    if (secret_len < 32 || env->GetArrayLength(peer_a) != 16 || env->GetArrayLength(peer_b) != 16) return nullptr;
+    std::vector<std::uint8_t> secret_bytes(static_cast<std::size_t>(secret_len));
+    std::vector<std::uint8_t> a(16), b(16), output(32);
+    env->GetByteArrayRegion(secret, 0, secret_len, reinterpret_cast<jbyte*>(secret_bytes.data()));
+    env->GetByteArrayRegion(peer_a, 0, 16, reinterpret_cast<jbyte*>(a.data()));
+    env->GetByteArrayRegion(peer_b, 0, 16, reinterpret_cast<jbyte*>(b.data()));
+    if (env->ExceptionCheck()) return nullptr;
+    const auto written = nm_derive_hop_key(secret_bytes.data(), secret_bytes.size(),
+        a.data(), b.data(), static_cast<std::uint64_t>(epoch), output.data(), output.size());
+    if (written != 32) return nullptr;
+    jbyteArray result = env->NewByteArray(32);
+    if (result != nullptr) env->SetByteArrayRegion(result, 0, 32, reinterpret_cast<const jbyte*>(output.data()));
+    return result;
+}
+
 extern "C" JNIEXPORT jint JNICALL
 Java_org_nexora_mesh_NativeMesh_validate(JNIEnv* env, jclass, jbyteArray input) {
     if (input == nullptr) return -1;
