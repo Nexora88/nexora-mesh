@@ -244,6 +244,8 @@ impl DeliveryTracker {
         Ok(self.records.remove(&ack.message_id).is_some())
     }
 
+    // Keep the ACK verification inputs explicit at this security boundary.
+    #[allow(clippy::too_many_arguments)]
     pub fn acknowledge_authenticated(
         &mut self,
         ack: &StoreAck,
