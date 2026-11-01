@@ -79,6 +79,7 @@ class BleGattTransport(context: Context) {
     private val serverNotificationQueues = ConcurrentHashMap<String, ArrayDeque<ByteArray>>()
     private val serverNotificationLocks = ConcurrentHashMap<String, Any>()
     private val serverNotificationsInFlight = ConcurrentHashMap.newKeySet<String>()
+    @Volatile private var serverNotificationInFlightPeer: String? = null
     @Volatile private var serverPeer: BluetoothDevice? = null
     @Volatile private var serverPeerReady = false
     @Volatile private var notificationInFlight = false
@@ -126,6 +127,7 @@ class BleGattTransport(context: Context) {
         serverPeers.clear(); serverPeerMtus.clear(); readyServerPeers.clear()
         serverNotificationQueues.clear(); serverNotificationLocks.clear()
         serverNotificationsInFlight.clear()
+        serverNotificationInFlightPeer = null
         status("BLE taşıması durduruldu.")
     }
 
@@ -442,6 +444,9 @@ class BleGattTransport(context: Context) {
         override fun onNotificationSent(device: BluetoothDevice, statusCode: Int) {
             val peerId = device.address
             serverNotificationsInFlight.remove(peerId)
+            synchronized(lock) {
+                if (serverNotificationInFlightPeer == peerId) serverNotificationInFlightPeer = null
+            }
             if (serverPeer?.address == peerId) notificationInFlight = false
             if (statusCode != BluetoothGatt.GATT_SUCCESS) {
                 serverNotificationQueues.remove(peerId)
@@ -571,22 +576,29 @@ class BleGattTransport(context: Context) {
     }
 
     private fun notifyNext(peerId: String? = null) {
-        val targetId = peerId ?: readyServerPeers.firstOrNull() ?: return
-        val peer = serverPeers[targetId] ?: return
-        val characteristic = serverCharacteristic ?: return
-        if (targetId !in readyServerPeers || !serverNotificationsInFlight.add(targetId)) return
-        val queue = serverNotificationQueues[targetId] ?: run {
-            serverNotificationsInFlight.remove(targetId)
-            return
-        }
-        val peerLock = serverNotificationLocks[targetId] ?: run {
-            serverNotificationsInFlight.remove(targetId)
-            return
-        }
-        val next = synchronized(peerLock) { if (queue.isEmpty()) null else queue.removeFirst() }
-        if (next == null) {
-            serverNotificationsInFlight.remove(targetId)
-            return
+        val targetId: String
+        val peer: BluetoothDevice
+        val characteristic: BluetoothGattCharacteristic
+        val queue: ArrayDeque<ByteArray>
+        val peerLock: Any
+        val next: ByteArray
+        synchronized(lock) {
+            if (serverNotificationInFlightPeer != null) return
+            val preferred = peerId?.takeIf { id ->
+                id in readyServerPeers && serverNotificationQueues[id]?.isNotEmpty() == true
+            }
+            val selected = preferred ?: readyServerPeers.firstOrNull { id ->
+                serverNotificationQueues[id]?.isNotEmpty() == true
+            } ?: return
+            targetId = selected
+            peer = serverPeers[targetId] ?: return
+            characteristic = serverCharacteristic ?: return
+            queue = serverNotificationQueues[targetId] ?: return
+            peerLock = serverNotificationLocks[targetId] ?: return
+            next = synchronized(peerLock) { if (queue.isEmpty()) null else queue.removeFirst() } ?: return
+            serverNotificationInFlightPeer = targetId
+            serverNotificationsInFlight.add(targetId)
+            notificationInFlight = true
         }
         try {
             @Suppress("DEPRECATION")
@@ -594,12 +606,20 @@ class BleGattTransport(context: Context) {
             @Suppress("DEPRECATION")
             val accepted = gattServer?.notifyCharacteristicChanged(peer, characteristic, false) == true
             if (!accepted) {
-                serverNotificationsInFlight.remove(targetId)
+                synchronized(lock) {
+                    serverNotificationInFlightPeer = null
+                    notificationInFlight = false
+                    serverNotificationsInFlight.remove(targetId)
+                }
                 synchronized(peerLock) { queue.addFirst(next) }
                 status("BLE bildirimi $targetId kuyru?una geri al?nd?; ba?lant? haz?r de?il.")
             }
         } catch (_: Exception) {
-            serverNotificationsInFlight.remove(targetId)
+            synchronized(lock) {
+                serverNotificationInFlightPeer = null
+                notificationInFlight = false
+                serverNotificationsInFlight.remove(targetId)
+            }
             synchronized(peerLock) { queue.addFirst(next) }
             status("BLE bildirimi g?nderilirken hata olu?tu: $targetId")
         }
