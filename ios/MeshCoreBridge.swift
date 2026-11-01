@@ -6,6 +6,49 @@ import MeshCore
 enum MeshCoreBridge {
     static let maxEnvelopeBytes = 256 * 1024
 
+    struct WireEnvelope {
+        let messageID: Data
+        let destinationToken: Data
+        let hopsRemaining: UInt8
+        let expiresAtUnix: UInt64
+        let ciphertext: Data
+    }
+
+    static func encodeEnvelope(messageID: Data, destinationToken: Data, hopsRemaining: UInt8,
+                               expiresAtUnix: UInt64, ciphertext: Data) -> Data? {
+        guard messageID.count == 16, destinationToken.count == 16,
+              hopsRemaining > 0, hopsRemaining <= 5,
+              !ciphertext.isEmpty, ciphertext.count <= maxEnvelopeBytes - 48 else { return nil }
+        var output = Data(count: ciphertext.count + 48)
+        let written = messageID.withUnsafeBytes { id in
+            destinationToken.withUnsafeBytes { destination in
+                ciphertext.withUnsafeBytes { payload in
+                    output.withUnsafeMutableBytes { out in
+                        nm_wire_encode(id.bindMemory(to: UInt8.self).baseAddress,
+                            destination.bindMemory(to: UInt8.self).baseAddress,
+                            hopsRemaining, expiresAtUnix,
+                            payload.bindMemory(to: UInt8.self).baseAddress, payload.count,
+                            out.bindMemory(to: UInt8.self).baseAddress, out.count)
+                    }
+                }
+            }
+        }
+        guard written > 0, written <= output.count else { return nil }
+        return Data(output.prefix(written))
+    }
+
+    static func inspectEnvelope(_ envelope: Data) -> WireEnvelope? {
+        guard (try? validate(envelope)) != nil, envelope.count >= 49 else { return nil }
+        let messageID = envelope.subdata(in: 3..<19)
+        let destination = envelope.subdata(in: 19..<35)
+        let hops = envelope[35]
+        let expiry = envelope.subdata(in: 36..<44).reduce(UInt64(0)) { ($0 << 8) | UInt64($1) }
+        let length = envelope.subdata(in: 44..<48).reduce(UInt32(0)) { ($0 << 8) | UInt32($1) }
+        guard Int(length) == envelope.count - 48 else { return nil }
+        return WireEnvelope(messageID: messageID, destinationToken: destination,
+            hopsRemaining: hops, expiresAtUnix: expiry, ciphertext: envelope.subdata(in: 48..<envelope.count))
+    }
+
     static func deriveHopKey(sharedSecret: Data, peerA: Data, peerB: Data, epoch: UInt64) -> Data? {
         guard sharedSecret.count >= 32, peerA.count == 16, peerB.count == 16 else { return nil }
         var output = Data(count: 32)

@@ -165,6 +165,51 @@ class BluetoothChatManager(context: Context) {
         receiverRegistered = true
     }
 
+    data class HopContext(
+        val localNodeId: ByteArray,
+        val remoteNodeId: ByteArray,
+        val hopKey: ByteArray
+    )
+
+    fun isSecureSessionReady(): Boolean =
+        secureChannel != null && remoteIdentity != null && remoteProofReceived && localProofAcked
+
+    fun localNodeId(): ByteArray =
+        MessageDigest.getInstance("SHA-256").digest(identity.keyPair.public.encoded).copyOf(16)
+
+    fun remoteNodeId(): ByteArray? {
+        val remote = remoteIdentity ?: return null
+        val encoded = runCatching { Base64.decode(remote.publicKeyBase64, Base64.DEFAULT) }.getOrNull() ?: return null
+        return MessageDigest.getInstance("SHA-256").digest(encoded).copyOf(16)
+    }
+
+    fun currentHopContext(epoch: Long): HopContext? {
+        if (!isSecureSessionReady()) return null
+        val remote = remoteIdentity ?: return null
+        val remotePublic = runCatching { Base64.decode(remote.publicKeyBase64, Base64.DEFAULT) }.getOrNull() ?: return null
+        val localPublic = identity.keyPair.public.encoded
+        val localId = MessageDigest.getInstance("SHA-256").digest(localPublic).copyOf(16)
+        val remoteId = MessageDigest.getInstance("SHA-256").digest(remotePublic).copyOf(16)
+        val key = secureChannel?.deriveHopKeyForPublicKeys(localPublic, remotePublic, epoch) ?: return null
+        return HopContext(localId, remoteId, key)
+    }
+
+    /** Wrap only authenticated DATA frames; HELLO/PROOF control frames remain handshake JSON. */
+    fun wrapBlePacket(packet: ByteArray, nowUnixSeconds: Long): ByteArray? {
+        val frame = runCatching { JSONObject(String(packet, StandardCharsets.UTF_8)) }.getOrNull() ?: return packet
+        if (frame.optString("t") !in setOf("DATA", "ACK")) return packet
+        val envelopeIdText = frame.optString("relayId").ifBlank { frame.optString("id") }
+        val id = runCatching { UUID.fromString(envelopeIdText) }.getOrNull() ?: return null
+        val messageID = java.nio.ByteBuffer.allocate(16)
+            .putLong(id.mostSignificantBits).putLong(id.leastSignificantBits).array()
+        val destination = frame.optString("toNode").takeIf { it.isNotBlank() }?.let {
+            runCatching { Base64.decode(it, Base64.NO_WRAP) }.getOrNull()
+        } ?: remoteNodeId() ?: return null
+        if (destination.size != 16) return null
+        val expiresAt = frame.optLong("expiresAt", nowUnixSeconds + 24 * 60 * 60)
+        return NativeMesh.encodeEnvelope(messageID, destination, 5, expiresAt, packet)
+    }
+
     fun addListener(listener: Listener) { listeners.add(listener); publishDevices(); listener.onConnectionChanged(connectedName) }
     fun removeListener(listener: Listener) { listeners.remove(listener) }
 
@@ -313,10 +358,10 @@ class BluetoothChatManager(context: Context) {
     }
 
     /** Accept one complete bounded BLE packet and route it through the existing protocol verifier. */
-    fun receiveBlePacket(packet: ByteArray) {
+    fun receiveBlePacket(packet: ByteArray): Boolean {
         if (packet.isEmpty() || packet.size > MAX_WIRE_BYTES) {
             status("BLE paketi boyut sınırını aştığı için reddedildi.")
-            return
+            return false
         }
         val line = try {
             StandardCharsets.UTF_8.newDecoder()
@@ -325,13 +370,17 @@ class BluetoothChatManager(context: Context) {
                 .decode(java.nio.ByteBuffer.wrap(packet)).toString()
         } catch (_: Exception) {
             status("BLE paketi geçerli UTF-8 değil; reddedildi.")
-            return
+            return false
         }
         if (line.contains('\n') || line.contains('\r')) {
             status("BLE paketinde beklenmeyen satır ayırıcı var; reddedildi.")
-            return
+            return false
         }
-        handleWireLine(line)
+        return handleWireLine(line)
+    }
+
+    fun trustedContactsForRouting(): List<ContactQr.Contact> = trustedContacts.all().map {
+        ContactQr.Contact(1, it.publicKeyBase64, it.fingerprint, it.label)
     }
 
     fun send(text: String): Boolean {
@@ -341,13 +390,50 @@ class BluetoothChatManager(context: Context) {
             status("Mesaj engellendi: karşı tarafın QR parmak izi doğrulanmadan şifreli kanal açılmaz.")
             return false
         }
+        val remote = remoteIdentity ?: return false
+        return sendEncryptedText(text, channel, remote)
+    }
+
+    /** Encrypt to any previously QR-trusted recipient, even when transport is an intermediate relay. */
+    fun sendToTrustedContact(text: String, fingerprint: String): Boolean {
+        if (text.isBlank() || (socket == null && bleSender == null)) return false
+        if (!isSecureSessionReady()) {
+            status("Röle üzerinden gönderim için önce bağlı BLE eşinin QR güvenini doğrula.")
+            return false
+        }
+        val contact = trustedContacts.all().firstOrNull {
+            it.fingerprint.equals(fingerprint, ignoreCase = true)
+        } ?: return false
         return try {
-            val plaintext = text.trim().toByteArray(StandardCharsets.UTF_8)
+            val publicKey = SecureChannel.decodePublicKey(contact.publicKeyBase64)
+            val channel = SecureChannel.derive(identity, publicKey)
+            sendEncryptedText(text, channel, ContactQr.Contact(1,
+                contact.publicKeyBase64, contact.fingerprint, contact.label))
+        } catch (_: Exception) {
+            status("Seçilen alıcı için doğrulanmış E2EE anahtarı türetilemedi.")
+            false
+        }
+    }
+
+    private fun sendEncryptedText(text: String, channel: SecureChannel, recipient: ContactQr.Contact): Boolean {
+        return try {
+            val normalized = text.trim()
+            val plaintext = normalized.toByteArray(StandardCharsets.UTF_8)
             val messageId = UUID.randomUUID().toString().lowercase()
-            val sealed = channel.encrypt(plaintext, dataAad(messageId))
+            val recipientPublic = Base64.decode(recipient.publicKeyBase64, Base64.DEFAULT)
+            val destinationNode = MessageDigest.getInstance("SHA-256").digest(recipientPublic).copyOf(16)
+            val fromFingerprint = identity.fingerprint
+            val toFingerprint = recipient.fingerprint
+            val toNodeText = Base64.encodeToString(destinationNode, Base64.NO_WRAP)
+            val expiresAt = System.currentTimeMillis() / 1000L + 24 * 60 * 60
+            val sealed = channel.encrypt(plaintext, dataAad(messageId, fromFingerprint, toFingerprint, toNodeText, expiresAt))
             val frame = JSONObject()
                 .put("t", "DATA")
                 .put("id", messageId)
+                .put("from", fromFingerprint)
+                .put("to", toFingerprint)
+                .put("toNode", toNodeText)
+                .put("expiresAt", expiresAt)
                 .put("n", Base64.encodeToString(sealed.nonce, Base64.NO_WRAP))
                 .put("c", Base64.encodeToString(sealed.ciphertext, Base64.NO_WRAP))
             if (!enqueuePending(messageId, frame)) {
@@ -355,8 +441,8 @@ class BluetoothChatManager(context: Context) {
                 return false
             }
             val sent = sendWire(frame)
-            mainHandler.post { listeners.forEach { it.onMessage(ChatMessage(text.trim(), true)) } }
-            if (!sent) status("Mesaj şifrelenip çevrimdışı kuyruğa kaydedildi; teslim onayı bekleniyor.")
+            mainHandler.post { listeners.forEach { it.onMessage(ChatMessage(normalized, true)) } }
+            if (!sent) status("Mesaj E2EE zarfa dönüştürülüp çevrimdışı kuyruğa kaydedildi; teslim onayı bekleniyor.")
             scheduleDeliveryRetry(messageId, 0)
             true
         } catch (_: Exception) {
@@ -393,7 +479,7 @@ class BluetoothChatManager(context: Context) {
         } catch (_: Exception) { status("Kimlik el sıkışması başlatılamadı.") }
     }
 
-    private fun handleWireLine(line: String) {
+    private fun handleWireLine(line: String): Boolean {
         try {
             require(line.length <= 2 * 1024 * 1024) { "Frame too large" }
             val frame = JSONObject(line)
@@ -445,26 +531,50 @@ class BluetoothChatManager(context: Context) {
                     maybeActivateSecureChannel()
                 }
                 "DATA" -> {
-                    val channel = secureChannel ?: throw SecurityException("Unverified peer sent data")
                     val messageId = frame.getString("id")
                     require(messageId.length == 36 && UUID.fromString(messageId).toString() == messageId) { "Invalid message id" }
+                    val fromFingerprint = frame.getString("from")
+                    val toFingerprint = frame.getString("to")
+                    val toNodeText = frame.getString("toNode")
+                    val expiresAt = frame.getLong("expiresAt")
+                    val destinationNode = Base64.decode(toNodeText, Base64.NO_WRAP)
+                    require(toFingerprint.equals(identity.fingerprint, ignoreCase = true) &&
+                        destinationNode.contentEquals(localNodeId()) && expiresAt > System.currentTimeMillis() / 1000L) { "DATA recipient mismatch or expired" }
+                    val sender = trustedContacts.all().firstOrNull {
+                        it.fingerprint.equals(fromFingerprint, ignoreCase = true)
+                    } ?: throw SecurityException("DATA sender is not QR-trusted")
+                    val channel = SecureChannel.derive(identity, SecureChannel.decodePublicKey(sender.publicKeyBase64))
                     val nonce = Base64.decode(frame.getString("n"), Base64.DEFAULT)
                     val ciphertext = Base64.decode(frame.getString("c"), Base64.DEFAULT)
-                    val plaintext = channel.decrypt(SecureChannel.Sealed(nonce, ciphertext), dataAad(messageId))
+                    val plaintext = channel.decrypt(SecureChannel.Sealed(nonce, ciphertext),
+                        dataAad(messageId, fromFingerprint, toFingerprint, toNodeText, expiresAt))
                     val isNew = rememberIncomingMessageId(messageId)
-                    sendDeliveryAck(messageId, channel)
+                    sendDeliveryAck(messageId, channel, fromFingerprint)
                     if (isNew) {
                         val text = plaintext.toString(StandardCharsets.UTF_8)
                         mainHandler.post { listeners.forEach { it.onMessage(ChatMessage(text, false)) } }
                     }
                 }
                 "ACK" -> {
-                    val channel = secureChannel ?: throw SecurityException("Unverified peer sent acknowledgement")
+                    val fromFingerprint = frame.getString("from")
+                    val toFingerprint = frame.getString("to")
+                    val toNodeText = frame.getString("toNode")
+                    val expiresAt = frame.getLong("expiresAt")
+                    val relayId = frame.getString("relayId")
+                    require(toFingerprint.equals(identity.fingerprint, ignoreCase = true) &&
+                        Base64.decode(toNodeText, Base64.NO_WRAP).contentEquals(localNodeId()) &&
+                        expiresAt > System.currentTimeMillis() / 1000L) { "ACK recipient mismatch or expired" }
+                    val sender = trustedContacts.all().firstOrNull {
+                        it.fingerprint.equals(fromFingerprint, ignoreCase = true)
+                    } ?: throw SecurityException("ACK sender is not QR-trusted")
+                    val channel = SecureChannel.derive(identity, SecureChannel.decodePublicKey(sender.publicKeyBase64))
                     val nonce = Base64.decode(frame.getString("n"), Base64.DEFAULT)
                     val ciphertext = Base64.decode(frame.getString("c"), Base64.DEFAULT)
-                    val control = JSONObject(channel.decrypt(SecureChannel.Sealed(nonce, ciphertext), CONTROL_AAD).toString(StandardCharsets.UTF_8))
+                    val control = JSONObject(channel.decrypt(SecureChannel.Sealed(nonce, ciphertext),
+                        routedControlAad(fromFingerprint, toFingerprint, relayId, toNodeText, expiresAt)).toString(StandardCharsets.UTF_8))
                     require(control.getString("type") == "DELIVERY_ACK")
                     val messageId = control.getString("id")
+                    require(frame.getString("id") == messageId)
                     require(messageId.length == 36 && UUID.fromString(messageId).toString() == messageId)
                     acknowledgePending(messageId)
                 }
@@ -477,8 +587,10 @@ class BluetoothChatManager(context: Context) {
                 }
                 else -> throw IllegalArgumentException("Unknown wire frame")
             }
+            true
         } catch (error: Exception) {
             status("Gelen paket reddedildi: biçim, güven veya şifre doğrulaması başarısız.")
+            false
         }
     }
 
@@ -668,11 +780,26 @@ class BluetoothChatManager(context: Context) {
         }, delay)
     }
 
-    private fun sendDeliveryAck(id: String, channel: SecureChannel) {
+    private fun sendDeliveryAck(id: String, channel: SecureChannel, recipientFingerprint: String) {
+        val recipient = trustedContacts.all().firstOrNull {
+            it.fingerprint.equals(recipientFingerprint, ignoreCase = true)
+        } ?: return
+        val recipientPublic = Base64.decode(recipient.publicKeyBase64, Base64.DEFAULT)
+        val destinationNode = MessageDigest.getInstance("SHA-256").digest(recipientPublic).copyOf(16)
+        val relayId = UUID.randomUUID().toString().lowercase()
+        val toNodeText = Base64.encodeToString(destinationNode, Base64.NO_WRAP)
+        val expiresAt = System.currentTimeMillis() / 1000L + 24 * 60 * 60
         val payload = JSONObject().put("type", "DELIVERY_ACK").put("id", id)
             .toString().toByteArray(StandardCharsets.UTF_8)
-        val sealed = channel.encrypt(payload, CONTROL_AAD)
+        val sealed = channel.encrypt(payload,
+            routedControlAad(identity.fingerprint, recipientFingerprint, relayId, toNodeText, expiresAt))
         sendWire(JSONObject().put("t", "ACK")
+            .put("id", id)
+            .put("relayId", relayId)
+            .put("from", identity.fingerprint)
+            .put("to", recipientFingerprint)
+            .put("toNode", toNodeText)
+            .put("expiresAt", expiresAt)
             .put("n", Base64.encodeToString(sealed.nonce, Base64.NO_WRAP))
             .put("c", Base64.encodeToString(sealed.ciphertext, Base64.NO_WRAP)))
     }
@@ -758,7 +885,12 @@ class BluetoothChatManager(context: Context) {
     }
 
     companion object {
-        private fun dataAad(messageId: String) = "NexoraMesh/data/v1:$messageId".toByteArray(StandardCharsets.UTF_8)
+        private fun dataAad(messageId: String, fromFingerprint: String, toFingerprint: String,
+                            toNode: String, expiresAt: Long) =
+            "NexoraMesh/data/v2:$fromFingerprint:$toFingerprint:$toNode:$expiresAt:$messageId".toByteArray(StandardCharsets.UTF_8)
+        private fun routedControlAad(fromFingerprint: String, toFingerprint: String,
+                                     relayId: String, toNode: String, expiresAt: Long) =
+            "NexoraMesh/control/v2:$fromFingerprint:$toFingerprint:$relayId:$toNode:$expiresAt".toByteArray(StandardCharsets.UTF_8)
         private const val MAX_REPLAY_IDS = 4096
         private const val MAX_PENDING_MESSAGES = 1000
         private const val MAX_DELIVERY_RETRIES = 8

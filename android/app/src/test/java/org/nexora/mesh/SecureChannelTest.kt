@@ -22,6 +22,57 @@ class SecureChannelTest {
     }
 
     @Test
+    fun routedCiphertextIsReadableByDestinationButNotIntermediateRelay() {
+        val alice = SecureChannel.newIdentityKeyPair()
+        val relay = SecureChannel.newIdentityKeyPair()
+        val charlie = SecureChannel.newIdentityKeyPair()
+        val aliceToCharlie = SecureChannel.derive(alice, charlie.keyPair.public)
+        val charlieFromAlice = SecureChannel.derive(charlie, alice.keyPair.public)
+        val aliceToRelay = SecureChannel.derive(alice, relay.keyPair.public)
+        val id = "123e4567-e89b-12d3-a456-426614174000"
+        val aad = "NexoraMesh/data/v2:ALICE:CHARLIE:$id".toByteArray()
+        val sealed = aliceToCharlie.encrypt("opaque relay".toByteArray(), aad)
+        assertArrayEquals("opaque relay".toByteArray(), charlieFromAlice.decrypt(sealed, aad))
+        var relayRejected = false
+        try { aliceToRelay.decrypt(sealed, aad) } catch (_: Exception) { relayRejected = true }
+        org.junit.Assert.assertTrue("Intermediate relay must not decrypt destination ciphertext", relayRejected)
+    }
+
+    @Test
+    fun rustEnvelopeEncodeAndInspectRoundTripsEncryptedPayload() {
+        val messageId = ByteArray(16) { it.toByte() }
+        val destination = ByteArray(16) { (it + 16).toByte() }
+        val ciphertext = ByteArray(64) { (it * 3).toByte() }
+        val envelope = NativeMesh.encodeEnvelope(messageId, destination, 4, 1_900_000_000L, ciphertext)
+        org.junit.Assert.assertNotNull(envelope)
+        val parsed = NativeMesh.inspectEnvelope(envelope!!)
+        assertArrayEquals(messageId, parsed?.messageId)
+        assertArrayEquals(destination, parsed?.destinationToken)
+        assertArrayEquals(ciphertext, parsed?.ciphertext)
+        org.junit.Assert.assertEquals(4, parsed?.hopsRemaining)
+        org.junit.Assert.assertEquals(1_900_000_000L, parsed?.expiresAtUnix)
+    }
+
+    @Test
+    fun peersDeriveSymmetricHopKeysAndRotateByEpoch() {
+        val alice = SecureChannel.newIdentityKeyPair()
+        val bob = SecureChannel.newIdentityKeyPair()
+        val aliceChannel = SecureChannel.derive(alice, bob.keyPair.public)
+        val bobChannel = SecureChannel.derive(bob, alice.keyPair.public)
+        val aliceKey = aliceChannel.deriveHopKeyForPublicKeys(
+            alice.keyPair.public.encoded, bob.keyPair.public.encoded, 9
+        )
+        val bobKey = bobChannel.deriveHopKeyForPublicKeys(
+            bob.keyPair.public.encoded, alice.keyPair.public.encoded, 9
+        )
+        assertArrayEquals(aliceKey, bobKey)
+        val rotated = aliceChannel.deriveHopKeyForPublicKeys(
+            alice.keyPair.public.encoded, bob.keyPair.public.encoded, 10
+        )
+        org.junit.Assert.assertNotEquals(aliceKey?.toList(), rotated?.toList())
+    }
+
+    @Test
     fun bothPeersDeriveSameKeyAndDecryptAuthenticatedPayload() {
         val alice = SecureChannel.newIdentityKeyPair()
         val bob = SecureChannel.newIdentityKeyPair()

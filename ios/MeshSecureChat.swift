@@ -41,6 +41,7 @@ final class MeshSecureChat: ObservableObject {
     private let controlAAD = Data("NexoraMesh/control/v1".utf8)
     private let messageLimit = 1000
     private var sendPacket: ((Data) -> Void)?
+    var onSecureReady: (() -> Void)?
     private var candidateKey: SymmetricKey?
     private var sessionKey: SymmetricKey?
     private var localProofNonce: String?
@@ -71,6 +72,46 @@ final class MeshSecureChat: ObservableObject {
         let keyMaterial = sessionKey.withUnsafeBytes { Data($0) }
         return MeshCoreBridge.deriveHopKey(sharedSecret: keyMaterial,
             peerA: localID, peerB: remoteID, epoch: epoch)
+    }
+
+    struct HopContext {
+        let localNodeID: Data
+        let remoteNodeID: Data
+        let hopKey: Data
+    }
+
+    func routingContacts() -> [Contact] { trustedContacts }
+
+    func localNodeID() -> Data? {
+        guard let der = try? localPublicKeyDER() else { return nil }
+        return Data(SHA256.hash(data: der).prefix(16))
+    }
+
+    func currentHopContext(epoch: UInt64) -> HopContext? {
+        guard let sessionKey, isSecure, let fingerprint = remoteFingerprint,
+              let contact = trustedContacts.first(where: {
+                  $0.fingerprint.caseInsensitiveCompare(fingerprint) == .orderedSame
+              }),
+              let localDER = try? localPublicKeyDER(),
+              let remoteDER = Data(base64Encoded: contact.publicKeyBase64) else { return nil }
+        let localID = Data(SHA256.hash(data: localDER).prefix(16))
+        let remoteID = Data(SHA256.hash(data: remoteDER).prefix(16))
+        let keyMaterial = sessionKey.withUnsafeBytes { Data($0) }
+        guard let hopKey = MeshCoreBridge.deriveHopKey(sharedSecret: keyMaterial,
+            peerA: localID, peerB: remoteID, epoch: epoch) else { return nil }
+        return HopContext(localNodeID: localID, remoteNodeID: remoteID, hopKey: hopKey)
+    }
+
+    private func deriveContactKey(fingerprint: String) -> (Contact, SymmetricKey)? {
+        guard let contact = trustedContacts.first(where: {
+            $0.fingerprint.caseInsensitiveCompare(fingerprint) == .orderedSame
+        }), let remoteDER = Data(base64Encoded: contact.publicKeyBase64),
+              let remoteKey = try? Self.publicSecKey(fromAndroidDER: remoteDER),
+              let privateKey = try? localPrivateKey() else { return nil }
+        var error: Unmanaged<CFError>?
+        guard let shared = SecKeyCopyKeyExchangeResult(privateKey, .ecdhKeyExchangeStandard,
+            remoteKey, [:] as CFDictionary, &error) as Data? else { return nil }
+        return (contact, Self.deriveSessionKey(sharedSecret: shared))
     }
 
     func selectRecipient(_ fingerprint: String?) {
@@ -155,9 +196,8 @@ final class MeshSecureChat: ObservableObject {
             status = "Mesaj gönderilmedi: önce güvenilir alıcı seç."
             return
         }
-        guard let sessionKey, isSecure,
-              remoteFingerprint?.caseInsensitiveCompare(recipient) == .orderedSame else {
-            status = "Taslak korundu; güvenli oturum kurulunca gönderim kuyruğuna alınacak."
+        guard isSecure, let (_, key) = deriveContactKey(fingerprint: recipient) else {
+            status = "Taslak korundu; bağlı BLE eşinin QR güvenini ve hedef kişinin QR kaydını doğrula."
             saveDraft(clean, for: recipient)
             defaults.set(true, forKey: queuedDraftPrefix + recipient.uppercased())
             return
@@ -172,31 +212,51 @@ final class MeshSecureChat: ObservableObject {
         guard pending.count < messageLimit else { status = "Teslim kuyruğu dolu."; return }
         do {
             let id = UUID().uuidString.lowercased()
-            let sealed = try Self.seal(Data(clean.utf8), key: sessionKey,
-                                       aad: Data("NexoraMesh/data/v1:\(id)".utf8))
+            let localDER = try localPublicKeyDER()
+            guard let remoteDER = Data(base64Encoded: trustedContacts.first(where: {
+                $0.fingerprint.caseInsensitiveCompare(recipient) == .orderedSame
+            })?.publicKeyBase64 ?? "") else { throw MeshSecureChatError.invalidContact }
+            let fromFingerprint = Self.fingerprint(localDER)
+            let destinationNode = Data(SHA256.hash(data: remoteDER).prefix(16))
+            let toNodeText = destinationNode.base64EncodedString()
+            let expiresAt = UInt64(Date().timeIntervalSince1970) + 24 * 60 * 60
+            let aad = Self.dataAAD(from: fromFingerprint, to: recipient, toNode: toNodeText, expiresAt: expiresAt, id: id)
+            let sealed = try Self.seal(Data(clean.utf8), key: key, aad: aad)
             let frame: [String: Any] = [
-                "t": "DATA", "id": id, "n": sealed.nonce.base64EncodedString(),
-                "c": sealed.ciphertext.base64EncodedString()
+                "t": "DATA", "id": id, "from": fromFingerprint, "to": recipient,
+                "toNode": toNodeText, "expiresAt": expiresAt,
+                "n": sealed.nonce.base64EncodedString(), "c": sealed.ciphertext.base64EncodedString()
             ]
             let raw = try JSONSerialization.data(withJSONObject: frame, options: [.sortedKeys])
-            pending.append(Pending(id: id, frame: raw, recipientFingerprint: recipient))
+            guard let uuid = UUID(uuidString: id) else { throw MeshSecureChatError.invalidFrame }
+            var uuidBytes = uuid.uuid
+            let messageID = withUnsafeBytes(of: &uuidBytes) { Data($0) }
+            guard let envelope = MeshCoreBridge.encodeEnvelope(messageID: messageID,
+                destinationToken: destinationNode, hopsRemaining: 5,
+                expiresAtUnix: expiresAt, ciphertext: raw) else {
+                throw MeshSecureChatError.invalidFrame
+            }
+            pending.append(Pending(id: id, frame: envelope, recipientFingerprint: recipient,
+                                   nextHopFingerprint: remoteFingerprint))
             try savePending(pending)
             defaults.removeObject(forKey: queuedDraftPrefix + recipient.uppercased())
             try keychainWriteDraft(Data(), account: recipient)
-            messages.append(Message(id: id, text: clean, outgoing: true, createdAt: Date(), delivery: "Teslim bekleniyor", recipientFingerprint: recipient))
-            sendPacket(raw)
+            messages.append(Message(id: id, text: clean, outgoing: true, createdAt: Date(),
+                delivery: "Teslim bekleniyor", recipientFingerprint: recipient))
+            sendPacket(envelope)
             scheduleRetry(id: id, attempt: 1)
         } catch {
             status = "Mesaj şifrelenemedi veya kalıcı kuyruğa kaydedilemedi."
         }
     }
 
-    func receive(_ packet: Data) {
+    @discardableResult
+    func receive(_ packet: Data) -> Bool {
         guard packet.count <= 256 * 1024,
               let frame = try? JSONSerialization.jsonObject(with: packet) as? [String: Any],
               let type = frame["t"] as? String else {
             status = "Paket reddedildi: geçersiz JSON veya boyut sınırı aşıldı."
-            return
+            return false
         }
         do {
             switch type {
@@ -215,10 +275,10 @@ final class MeshSecureChat: ObservableObject {
                 }) else {
                     isSecure = false
                     status = "Karşı taraf tanındı; QR kodunu doğrulayıp güvenilir kişilere ekle."
-                    return
+                    return false
                 }
                 activateIfTrusted(contact)
-            case "PROOF", "PROOF_ACK", "ACK":
+            case "PROOF", "PROOF_ACK":
                 guard let key = candidateKey ?? sessionKey else { throw MeshSecureChatError.noSession }
                 let opened = try Self.open(frame, key: key, aad: controlAAD)
                 let control = (try JSONSerialization.jsonObject(with: opened)) as? [String: Any]
@@ -229,33 +289,27 @@ final class MeshSecureChat: ObservableObject {
                     remoteProofReceived = true
                     sendControl(type: "PROOF_ACK", payload: ["type": "PROOF_ACK", "nonce": nonce], key: key)
                     maybeActivate()
-                } else if type == "PROOF_ACK" {
+                } else {
                     guard let control, control["type"] as? String == "PROOF_ACK",
                           control["nonce"] as? String == localProofNonce else { throw MeshSecureChatError.invalidProof }
                     localProofAcked = true
                     maybeActivate()
-                } else {
-                    guard isSecure, let control, control["type"] as? String == "DELIVERY_ACK",
-                          let id = control["id"] as? String, UUID(uuidString: id) != nil else {
-                        throw MeshSecureChatError.invalidProof
-                    }
-                    var pending = loadPending()
-                    pending.removeAll { $0.id == id }
-                    try savePending(pending)
-                    retryCounts.removeValue(forKey: id)
-                    retryScheduled.remove(id)
-                    persistRetryCounts()
-                    if let index = messages.firstIndex(where: { $0.id == id }) { messages[index].delivery = "Teslim edildi" }
                 }
             case "DATA":
-                guard isSecure, let key = sessionKey, let id = frame["id"] as? String,
-                      UUID(uuidString: id) != nil,
+                guard let id = frame["id"] as? String, UUID(uuidString: id) != nil,
+                      let from = frame["from"] as? String, let to = frame["to"] as? String,
+                      let toNodeText = frame["toNode"] as? String,
+                      let toNode = Data(base64Encoded: toNodeText),
+                      let expiresAt = frame["expiresAt"] as? UInt64,
+                      to.caseInsensitiveCompare(try Self.fingerprint(localPublicKeyDER())) == .orderedSame,
+                      toNode == localNodeID(), expiresAt > UInt64(Date().timeIntervalSince1970),
+                      let (_, key) = deriveContactKey(fingerprint: from),
                       let nonceText = frame["n"] as? String,
                       let cipherText = frame["c"] as? String,
                       let nonce = Data(base64Encoded: nonceText),
                       let ciphertext = Data(base64Encoded: cipherText) else { throw MeshSecureChatError.invalidProof }
-                let plaintext = try Self.open(nonce: nonce, ciphertext: ciphertext, key: key,
-                                              aad: Data("NexoraMesh/data/v1:\(id)".utf8))
+                let aad = Self.dataAAD(from: from, to: to, toNode: toNodeText, expiresAt: expiresAt, id: id)
+                let plaintext = try Self.open(nonce: nonce, ciphertext: ciphertext, key: key, aad: aad)
                 var received = loadReceivedIDs()
                 let isNew = Self.acceptMessageID(id, seen: received)
                 if isNew {
@@ -263,15 +317,42 @@ final class MeshSecureChat: ObservableObject {
                     if received.count > 4096 { received.removeFirst(received.count - 4096) }
                     try saveReceivedIDs(received)
                     messages.append(Message(id: id, text: String(decoding: plaintext, as: UTF8.self),
-                                            outgoing: false, createdAt: Date(), delivery: "Alındı",
-                                            recipientFingerprint: remoteFingerprint))
+                        outgoing: false, createdAt: Date(), delivery: "Alındı", recipientFingerprint: from))
                 }
-                sendControl(type: "ACK", payload: ["type": "DELIVERY_ACK", "id": id], key: key)
+                sendDeliveryAck(id: id, recipientFingerprint: from, key: key)
+            case "ACK":
+                guard let id = frame["id"] as? String, UUID(uuidString: id) != nil,
+                      let from = frame["from"] as? String, let to = frame["to"] as? String,
+                      let toNodeText = frame["toNode"] as? String,
+                      let toNode = Data(base64Encoded: toNodeText),
+                      let expiresAt = frame["expiresAt"] as? UInt64,
+                      let relayID = frame["relayId"] as? String,
+                      to.caseInsensitiveCompare(try Self.fingerprint(localPublicKeyDER())) == .orderedSame,
+                      toNode == localNodeID(), expiresAt > UInt64(Date().timeIntervalSince1970),
+                      let (_, key) = deriveContactKey(fingerprint: from) else { throw MeshSecureChatError.invalidProof }
+                let opened = try Self.open(frame, key: key,
+                    aad: Self.routedControlAAD(from: from, to: to, relayID: relayID, toNode: toNodeText, expiresAt: expiresAt))
+                let control = (try JSONSerialization.jsonObject(with: opened)) as? [String: Any]
+                guard let control, control["type"] as? String == "DELIVERY_ACK",
+                      let deliveredID = control["id"] as? String,
+                      deliveredID == id,
+                      UUID(uuidString: deliveredID) != nil else { throw MeshSecureChatError.invalidProof }
+                var pending = loadPending()
+                pending.removeAll { $0.id == deliveredID }
+                try savePending(pending)
+                retryCounts.removeValue(forKey: deliveredID)
+                retryScheduled.remove(deliveredID)
+                persistRetryCounts()
+                if let index = messages.firstIndex(where: { $0.id == deliveredID }) {
+                    messages[index].delivery = "Teslim edildi"
+                }
             default:
                 throw MeshSecureChatError.invalidFrame
             }
+            return true
         } catch {
             status = "Paket reddedildi: kimlik, biçim veya şifre doğrulaması başarısız."
+            return false
         }
     }
 
@@ -280,6 +361,7 @@ final class MeshSecureChat: ObservableObject {
         let frame: Data
         // Optional so records from earlier experimental builds still decode.
         let recipientFingerprint: String?
+        let nextHopFingerprint: String?
     }
 
     private func localPrivateKey() throws -> SecKey {
@@ -377,6 +459,7 @@ final class MeshSecureChat: ObservableObject {
         isSecure = true
         status = "QR doğrulamalı AES-GCM oturumu etkin."
         flushPending()
+        onSecureReady?()
         if let recipient = selectedRecipientFingerprint,
            recipient.caseInsensitiveCompare(remoteFingerprint ?? "") == .orderedSame,
            defaults.bool(forKey: queuedDraftPrefix + recipient.uppercased()) {
@@ -395,6 +478,38 @@ final class MeshSecureChat: ObservableObject {
         if let raw = try? JSONSerialization.data(withJSONObject: frame, options: [.sortedKeys]) { sendPacket(raw) }
     }
 
+    private func sendDeliveryAck(id: String, recipientFingerprint: String, key: SymmetricKey) {
+        guard let recipient = trustedContacts.first(where: {
+            $0.fingerprint.caseInsensitiveCompare(recipientFingerprint) == .orderedSame
+        }), let remoteDER = Data(base64Encoded: recipient.publicKeyBase64),
+           let localDER = try? localPublicKeyDER(), let sendPacket else { return }
+        let destinationNode = Data(SHA256.hash(data: remoteDER).prefix(16))
+        let toNodeText = destinationNode.base64EncodedString()
+        let fromFingerprint = Self.fingerprint(localDER)
+        let relayID = UUID().uuidString.lowercased()
+        let expiresAt = UInt64(Date().timeIntervalSince1970) + 24 * 60 * 60
+        let payload = (try? JSONSerialization.data(withJSONObject: ["type": "DELIVERY_ACK", "id": id],
+                                                    options: [.sortedKeys])) ?? Data()
+        let aad = Self.routedControlAAD(from: fromFingerprint, to: recipientFingerprint,
+            relayID: relayID, toNode: toNodeText, expiresAt: expiresAt)
+        guard let sealed = try? Self.seal(payload, key: key, aad: aad) else { return }
+        let frame: [String: Any] = [
+            "t": "ACK", "id": id, "relayId": relayID,
+            "from": fromFingerprint, "to": recipientFingerprint,
+            "toNode": toNodeText, "expiresAt": expiresAt,
+            "n": sealed.nonce.base64EncodedString(), "c": sealed.ciphertext.base64EncodedString()
+        ]
+        guard let raw = try? JSONSerialization.data(withJSONObject: frame, options: [.sortedKeys]),
+              let uuid = UUID(uuidString: relayID) else { return }
+        var uuidBytes = uuid.uuid
+        let messageID = withUnsafeBytes(of: &uuidBytes) { Data($0) }
+        let now = UInt64(Date().timeIntervalSince1970)
+        guard let envelope = MeshCoreBridge.encodeEnvelope(messageID: messageID,
+            destinationToken: destinationNode, hopsRemaining: 5,
+            expiresAtUnix: now + 24 * 60 * 60, ciphertext: raw) else { return }
+        sendPacket(envelope)
+    }
+
     private func sendControl(type: String, payload: [String: Any], key: SymmetricKey) {
         guard let raw = try? JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys]),
               let sealed = try? Self.seal(raw, key: key, aad: controlAAD),
@@ -404,9 +519,9 @@ final class MeshSecureChat: ObservableObject {
     }
 
     private func flushPending() {
-        guard let sendPacket, let remoteFingerprint else { return }
-        // Never flush a stored frame to a different trusted recipient.
-        for item in loadPending() where item.recipientFingerprint?.caseInsensitiveCompare(remoteFingerprint) == .orderedSame {
+        guard let sendPacket else { return }
+        // Envelopes carry their own destination token, so any trusted next hop may carry them.
+        for item in loadPending() where item.nextHopFingerprint?.caseInsensitiveCompare(remoteFingerprint ?? "") == .orderedSame {
             if (retryCounts[item.id] ?? 0) > 8 { retryCounts[item.id] = 0 }
             sendPacket(item.frame)
             scheduleRetry(id: item.id, attempt: max(1, retryCounts[item.id] ?? 1))
@@ -593,4 +708,33 @@ final class MeshSecureChat: ObservableObject {
 
 enum MeshSecureChatError: Error {
     case invalidContact, fingerprintMismatch, keyStore, invalidProof, noSession, invalidFrame
+}
+
+
+/// Owns an independent authenticated chat/hop-key state for every BLE peer.
+final class MeshPeerSessionRegistry: ObservableObject {
+    @Published private(set) var sessions: [UUID: MeshSecureChat] = [:]
+    let fallback = MeshSecureChat()
+
+    func session(for peerID: UUID) -> MeshSecureChat {
+        if let existing = sessions[peerID] { return existing }
+        let created = MeshSecureChat()
+        created.selectRecipient(fallback.selectedRecipientFingerprint)
+        sessions[peerID] = created
+        return created
+    }
+
+    func trustQRPayload(_ payload: String) throws {
+        try fallback.trustQRPayload(payload)
+        for session in sessions.values { try session.trustQRPayload(payload) }
+    }
+
+    func selectRecipient(_ fingerprint: String?) {
+        fallback.selectRecipient(fingerprint)
+        for session in sessions.values { session.selectRecipient(fingerprint) }
+    }
+
+    func removeSession(for peerID: UUID) {
+        sessions.removeValue(forKey: peerID)
+    }
 }

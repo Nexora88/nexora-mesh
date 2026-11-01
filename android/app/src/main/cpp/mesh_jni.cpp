@@ -64,6 +64,31 @@ Java_org_nexora_mesh_NativeMesh_deriveHopKey(JNIEnv* env, jclass, jbyteArray sec
     return result;
 }
 
+extern "C" JNIEXPORT jbyteArray JNICALL
+Java_org_nexora_mesh_NativeMesh_encodeEnvelope(JNIEnv* env, jclass, jbyteArray message_id,
+    jbyteArray destination, jint hops, jlong expires_at, jbyteArray ciphertext) {
+    if (message_id == nullptr || destination == nullptr || ciphertext == nullptr ||
+        env->GetArrayLength(message_id) != 16 || env->GetArrayLength(destination) != 16 ||
+        hops < 1 || hops > 5 || expires_at < 0) return nullptr;
+    const jsize payload_len = env->GetArrayLength(ciphertext);
+    if (payload_len <= 0 || payload_len > kMaxEnvelope - 48) return nullptr;
+    std::vector<std::uint8_t> id(16), destination_bytes(16);
+    std::vector<std::uint8_t> payload(static_cast<std::size_t>(payload_len));
+    env->GetByteArrayRegion(message_id, 0, 16, reinterpret_cast<jbyte*>(id.data()));
+    env->GetByteArrayRegion(destination, 0, 16, reinterpret_cast<jbyte*>(destination_bytes.data()));
+    env->GetByteArrayRegion(ciphertext, 0, payload_len, reinterpret_cast<jbyte*>(payload.data()));
+    if (env->ExceptionCheck()) return nullptr;
+    std::vector<std::uint8_t> output(static_cast<std::size_t>(payload_len) + 48);
+    const auto written = nm_wire_encode(id.data(), destination_bytes.data(),
+        static_cast<std::uint8_t>(hops), static_cast<std::uint64_t>(expires_at),
+        payload.data(), payload.size(), output.data(), output.size());
+    if (written <= 0 || static_cast<std::size_t>(written) > output.size()) return nullptr;
+    jbyteArray result = env->NewByteArray(static_cast<jsize>(written));
+    if (result != nullptr) env->SetByteArrayRegion(result, 0, static_cast<jsize>(written),
+        reinterpret_cast<const jbyte*>(output.data()));
+    return result;
+}
+
 extern "C" JNIEXPORT jint JNICALL
 Java_org_nexora_mesh_NativeMesh_validate(JNIEnv* env, jclass, jbyteArray input) {
     if (input == nullptr) return -1;

@@ -18,12 +18,46 @@ final class MeshSecureChatCryptoTests: XCTestCase {
         )
     }
 
+    func testRustEnvelopeEncodingRoundTripsOpaqueCiphertext() {
+        let messageID = Data((0..<16).map(UInt8.init))
+        let destination = Data((16..<32).map(UInt8.init))
+        let ciphertext = Data((0..<64).map { UInt8(($0 * 3) & 0xff) })
+        let encoded = MeshCoreBridge.encodeEnvelope(messageID: messageID,
+            destinationToken: destination, hopsRemaining: 4,
+            expiresAtUnix: 1_900_000_000, ciphertext: ciphertext)
+        XCTAssertNotNil(encoded)
+        let decoded = encoded.flatMap { MeshCoreBridge.inspectEnvelope($0) }
+        XCTAssertEqual(decoded?.messageID, messageID)
+        XCTAssertEqual(decoded?.destinationToken, destination)
+        XCTAssertEqual(decoded?.hopsRemaining, 4)
+        XCTAssertEqual(decoded?.expiresAtUnix, 1_900_000_000)
+        XCTAssertEqual(decoded?.ciphertext, ciphertext)
+    }
+
+    func testRustHopKeyDerivationIsPeerSymmetricAndEpochScoped() {
+        let secret = Data(repeating: 0x31, count: 32)
+        let peerA = Data(repeating: 0x01, count: 16)
+        let peerB = Data(repeating: 0x02, count: 16)
+        let forward = MeshCoreBridge.deriveHopKey(sharedSecret: secret,
+            peerA: peerA, peerB: peerB, epoch: 42)
+        let reverse = MeshCoreBridge.deriveHopKey(sharedSecret: secret,
+            peerA: peerB, peerB: peerA, epoch: 42)
+        let rotated = MeshCoreBridge.deriveHopKey(sharedSecret: secret,
+            peerA: peerA, peerB: peerB, epoch: 43)
+        XCTAssertEqual(forward, reverse)
+        XCTAssertNotEqual(forward, rotated)
+        XCTAssertNil(MeshCoreBridge.deriveHopKey(sharedSecret: Data(repeating: 1, count: 16),
+            peerA: peerA, peerB: peerB, epoch: 42))
+    }
+
     func testTamperedCiphertextIsRejected() throws {
         let key = SymmetricKey(data: Data(repeating: 7, count: 32))
         let aad = Data("NexoraMesh/data/v1:test".utf8)
         let sealed = try MeshSecureChat.seal(Data("hello".utf8), key: key, aad: aad)
-        var tampered = sealed.ciphertext
-        tampered[0] ^= 0x01
+        var tamperedBytes = [UInt8](sealed.ciphertext)
+        XCTAssertGreaterThan(tamperedBytes.count, 16)
+        tamperedBytes[tamperedBytes.count - 1] ^= 0x01 // corrupt the authentication tag
+        let tampered = Data(tamperedBytes)
         XCTAssertThrowsError(try MeshSecureChat.open(
             nonce: sealed.nonce, ciphertext: tampered, key: key, aad: aad
         ))

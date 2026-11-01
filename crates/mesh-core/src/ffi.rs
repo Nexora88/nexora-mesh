@@ -46,6 +46,49 @@ pub unsafe extern "C" fn nm_derive_hop_key(
     .unwrap_or(-127)
 }
 
+/// Encode an opaque, already encrypted payload into the v1 store-forward wire envelope.
+/// # Safety
+/// Fixed-size pointers must reference 16 readable bytes; ciphertext must reference ciphertext_len
+/// readable bytes; output must reference output_capacity writable bytes when capacity is sufficient.
+#[no_mangle]
+pub unsafe extern "C" fn nm_wire_encode(
+    message_id: *const u8,
+    destination_token: *const u8,
+    hops_remaining: u8,
+    expires_at_unix: u64,
+    ciphertext: *const u8,
+    ciphertext_len: usize,
+    output: *mut u8,
+    output_capacity: usize,
+) -> isize {
+    if message_id.is_null() || destination_token.is_null() || ciphertext.is_null()
+        || ciphertext_len == 0 || ciphertext_len > crate::relay::MAX_CIPHERTEXT_BYTES {
+        return -20;
+    }
+    catch_unwind(AssertUnwindSafe(|| {
+        let mut id = [0u8; 16];
+        let mut destination = [0u8; 16];
+        id.copy_from_slice(slice::from_raw_parts(message_id, 16));
+        destination.copy_from_slice(slice::from_raw_parts(destination_token, 16));
+        let payload = slice::from_raw_parts(ciphertext, ciphertext_len).to_vec();
+        let envelope = crate::relay::Envelope {
+            message_id: id,
+            destination_token: destination,
+            hops_remaining,
+            expires_at_unix,
+            ciphertext: payload,
+        };
+        let encoded = match encode_envelope(&envelope) {
+            Ok(value) => value,
+            Err(error) => return error_code(error) as isize,
+        };
+        if output_capacity < encoded.len() { return encoded.len() as isize; }
+        if output.is_null() { return -21; }
+        slice::from_raw_parts_mut(output, encoded.len()).copy_from_slice(&encoded);
+        encoded.len() as isize
+    })).unwrap_or(-127)
+}
+
 fn error_code(error: WireError) -> i32 {
     match error {
         WireError::HeaderTooShort => -1,

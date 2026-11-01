@@ -45,6 +45,9 @@ class BleGattTransport(context: Context) {
         fun onPacket(packet: ByteArray)
         fun onConnected(peerLabel: String) {}
         fun onDisconnected() {}
+        fun onConnected(peerId: String, peerLabel: String) { onConnected(peerLabel) }
+        fun onDisconnected(peerId: String) { onDisconnected() }
+        fun onPacketFromPeer(peerId: String, packet: ByteArray) { onPacket(packet) }
     }
 
     private val app = context.applicationContext
@@ -52,6 +55,14 @@ class BleGattTransport(context: Context) {
     private val adapter: BluetoothAdapter? = manager.adapter
     private val peers = ConcurrentHashMap<String, Peer>()
     private val assemblies = ConcurrentHashMap<String, Assembly>()
+    // Every central-side BLE connection owns independent GATT state and write ordering.
+    private val clientGatts = ConcurrentHashMap<String, BluetoothGatt>()
+    private val clientCharacteristics = ConcurrentHashMap<String, BluetoothGattCharacteristic>()
+    private val clientMtus = ConcurrentHashMap<String, Int>()
+    private val clientWriteQueues = ConcurrentHashMap<String, ArrayDeque<ByteArray>>()
+    private val clientWriteLocks = ConcurrentHashMap<String, Any>()
+    private val peerAssemblies = ConcurrentHashMap<String, ConcurrentHashMap<String, Assembly>>()
+    @Volatile private var activeClientPeerId: String? = null
     @Volatile private var listener: Listener? = null
     @Volatile private var gattServer: BluetoothGattServer? = null
     @Volatile private var gatt: BluetoothGatt? = null
@@ -61,6 +72,13 @@ class BleGattTransport(context: Context) {
     @Volatile private var serverMtu = 23
     private val pendingWrites = ArrayDeque<ByteArray>()
     private val pendingNotifications = ArrayDeque<ByteArray>()
+    // Peripheral-side links are independent: each central owns its MTU and queue.
+    private val serverPeers = ConcurrentHashMap<String, BluetoothDevice>()
+    private val serverPeerMtus = ConcurrentHashMap<String, Int>()
+    private val readyServerPeers = ConcurrentHashMap.newKeySet<String>()
+    private val serverNotificationQueues = ConcurrentHashMap<String, ArrayDeque<ByteArray>>()
+    private val serverNotificationLocks = ConcurrentHashMap<String, Any>()
+    private val serverNotificationsInFlight = ConcurrentHashMap.newKeySet<String>()
     @Volatile private var serverPeer: BluetoothDevice? = null
     @Volatile private var serverPeerReady = false
     @Volatile private var notificationInFlight = false
@@ -93,7 +111,10 @@ class BleGattTransport(context: Context) {
     fun stop() {
         stopDiscovery()
         try { adapter?.bluetoothLeAdvertiser?.stopAdvertising(advertiseCallback) } catch (_: Exception) {}
-        try { gatt?.disconnect(); gatt?.close() } catch (_: Exception) {}
+        clientGatts.values.forEach { try { it.disconnect(); it.close() } catch (_: Exception) {} }
+        clientGatts.clear(); clientCharacteristics.clear(); clientMtus.clear()
+        clientWriteQueues.clear(); clientWriteLocks.clear(); peerAssemblies.clear()
+        activeClientPeerId = null
         gatt = null
         try { gattServer?.close() } catch (_: Exception) {}
         gattServer = null
@@ -102,20 +123,127 @@ class BleGattTransport(context: Context) {
         serverPeer = null
         serverPeerReady = false
         notificationInFlight = false
+        serverPeers.clear(); serverPeerMtus.clear(); readyServerPeers.clear()
+        serverNotificationQueues.clear(); serverNotificationLocks.clear()
+        serverNotificationsInFlight.clear()
         status("BLE taşıması durduruldu.")
     }
 
     fun connect(peer: Peer) {
         val a = adapter ?: return status("Bluetooth yok.")
+        val peerId = peer.device.address
+        activeClientPeerId = peerId
+        if (clientGatts.containsKey(peerId)) return status("Bu BLE eşi zaten bağlı: ${peer.label}")
         try {
-            gatt?.disconnect()
-            gatt?.close()
-            gatt = peer.device.connectGatt(app, false, clientCallback, BluetoothDevice.TRANSPORT_LE)
-            status("BLE GATT bağlantısı kuruluyor: ${peer.label}")
+            val connection = peer.device.connectGatt(app, false, clientCallback, BluetoothDevice.TRANSPORT_LE)
+            clientGatts[peerId] = connection
+            clientWriteQueues[peerId] = ArrayDeque()
+            clientWriteLocks[peerId] = Any()
+            peerAssemblies[peerId] = ConcurrentHashMap()
+            activeClientPeerId = peerId
+            status("Ayrı BLE GATT oturumu kuruluyor: ${peer.label}")
         } catch (_: SecurityException) { status("Bluetooth bağlantı izni gerekli.") }
     }
 
+    fun connectedPeerIds(): Set<String> = clientGatts.keys.toSet() + serverPeers.keys
+
+    fun disconnect(peerId: String) {
+        val connection = clientGatts[peerId]
+        if (connection != null) {
+            try { connection.disconnect() } catch (_: Exception) { connection.close() }
+            return
+        }
+        val incoming = serverPeers.remove(peerId)
+        if (incoming != null) {
+            readyServerPeers.remove(peerId); serverPeerMtus.remove(peerId)
+            serverNotificationQueues.remove(peerId); serverNotificationLocks.remove(peerId)
+            serverNotificationsInFlight.remove(peerId)
+            if (serverPeer?.address == peerId) {
+                serverPeer = serverPeers.values.firstOrNull()
+                serverPeerReady = serverPeer?.address?.let { readyServerPeers.contains(it) } == true
+            }
+            try { gattServer?.cancelConnection(incoming) } catch (_: Exception) {}
+        }
+    }
+
+    private fun sendEnvelopeToServerPeer(peerId: String, envelope: ByteArray): Boolean {
+        val peer = serverPeers[peerId] ?: return false
+        if (peerId !in readyServerPeers || serverCharacteristic == null) return false
+        if (envelope.isEmpty() || envelope.size > MAX_ENVELOPE) return false
+        val mtu = serverPeerMtus[peerId] ?: 23
+        val maxPayload = mtu - 3 - HEADER_BYTES
+        if (maxPayload <= 0) return false
+        val transfer = ByteArray(16).also { java.security.SecureRandom().nextBytes(it) }
+        val total = (envelope.size + maxPayload - 1) / maxPayload
+        if (total > 65535) return false
+        val fragments = (0 until total).map { index ->
+            val start = index * maxPayload
+            val end = minOf(envelope.size, start + maxPayload)
+            ByteBuffer.allocate(HEADER_BYTES + end - start).order(ByteOrder.BIG_ENDIAN)
+                .put(transfer).putShort(index.toShort()).putShort(total.toShort())
+                .putShort((end - start).toShort()).put(envelope, start, end - start).array()
+        }
+        val queue = serverNotificationQueues.computeIfAbsent(peerId) { ArrayDeque() }
+        val peerLock = serverNotificationLocks.computeIfAbsent(peerId) { Any() }
+        synchronized(peerLock) {
+            if (queue.size + fragments.size > 8192) return false
+            queue.addAll(fragments)
+        }
+        notifyNext(peerId)
+        return true
+    }
+
+    /** Send through one explicit peer session; queues and MTU are never shared across peers. */
+    fun sendEnvelope(peerId: String, envelope: ByteArray): Boolean {
+        val current = clientGatts[peerId] ?: return sendEnvelopeToServerPeer(peerId, envelope)
+        if (envelope.isEmpty() || envelope.size > MAX_ENVELOPE) return false
+        val characteristic = clientCharacteristics[peerId] ?: return false
+        val mtu = clientMtus[peerId] ?: 23
+        val maxPayload = mtu - 3 - HEADER_BYTES
+        if (maxPayload <= 0) return false
+        val transfer = ByteArray(16).also { java.security.SecureRandom().nextBytes(it) }
+        val total = (envelope.size + maxPayload - 1) / maxPayload
+        if (total > 65535) return false
+        val fragments = (0 until total).map { index ->
+            val start = index * maxPayload
+            val end = minOf(envelope.size, start + maxPayload)
+            ByteBuffer.allocate(HEADER_BYTES + end - start).order(ByteOrder.BIG_ENDIAN)
+                .put(transfer).putShort(index.toShort()).putShort(total.toShort())
+                .putShort((end - start).toShort()).put(envelope, start, end - start).array()
+        }
+        val queue = clientWriteQueues[peerId] ?: return false
+        val peerLock = clientWriteLocks[peerId] ?: return false
+        synchronized(peerLock) {
+            if (queue.size + fragments.size > 8192) return false
+            queue.addAll(fragments)
+        }
+        return writeNextForPeer(peerId, current, characteristic)
+    }
+
+    private fun writeNextForPeer(peerId: String, current: BluetoothGatt, characteristic: BluetoothGattCharacteristic): Boolean {
+        val queue = clientWriteQueues[peerId] ?: return false
+        val peerLock = clientWriteLocks[peerId] ?: return false
+        val next = synchronized(peerLock) { if (queue.isEmpty()) null else queue.removeFirst() } ?: return true
+        return try {
+            val started = if (Build.VERSION.SDK_INT >= 33) {
+                current.writeCharacteristic(characteristic, next, BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT) == BluetoothGatt.GATT_SUCCESS
+            } else {
+                @Suppress("DEPRECATION")
+                characteristic.value = next
+                @Suppress("DEPRECATION")
+                current.writeCharacteristic(characteristic)
+            }
+            if (!started) synchronized(peerLock) { queue.addFirst(next) }
+            started
+        } catch (_: Exception) {
+            synchronized(peerLock) { queue.addFirst(next) }
+            false
+        }
+    }
+
     fun sendEnvelope(envelope: ByteArray): Boolean {
+        val peerId = activeClientPeerId ?: serverPeer?.address
+        if (peerId != null) return sendEnvelope(peerId, envelope)
         if (envelope.isEmpty() || envelope.size > MAX_ENVELOPE) {
             status("Zarf boş veya 256 KiB sınırını aşıyor.")
             return false
@@ -268,21 +396,31 @@ class BleGattTransport(context: Context) {
         }
         override fun onConnectionStateChange(device: BluetoothDevice, statusCode: Int, newState: Int) {
             if (newState == BluetoothProfile.STATE_CONNECTED) {
+                val peerId = device.address
+                serverPeers[peerId] = device
+                serverNotificationQueues.putIfAbsent(peerId, ArrayDeque())
+                serverNotificationLocks.putIfAbsent(peerId, Any())
                 serverPeer = device
                 serverPeerReady = false
                 status("BLE istemcisi bağlandı; bildirim izni bekleniyor.")
             } else {
-                if (serverPeer?.address == device.address) {
-                    serverPeer = null
-                    serverPeerReady = false
-                    synchronized(lock) { pendingNotifications.clear() }
+                val peerId = device.address
+                serverPeers.remove(peerId); readyServerPeers.remove(peerId)
+                serverPeerMtus.remove(peerId); serverNotificationQueues.remove(peerId)
+                serverNotificationLocks.remove(peerId); serverNotificationsInFlight.remove(peerId)
+                if (serverPeer?.address == peerId) {
+                    serverPeer = serverPeers.values.firstOrNull()
+                    serverPeerReady = serverPeer?.address?.let { readyServerPeers.contains(it) } == true
                 }
-                listener?.onDisconnected()
-                status("BLE istemcisi ayrıldı.")
+                listener?.onDisconnected(device.address)
+                status("BLE istemcisi ayrıldı: ${device.address}")
             }
         }
         override fun onMtuChanged(device: BluetoothDevice, mtuSize: Int) {
-            if (mtuSize >= 23) serverMtu = mtuSize
+            if (mtuSize >= 23) {
+                serverPeerMtus[device.address] = mtuSize
+                if (serverPeer?.address == device.address) serverMtu = mtuSize
+            }
         }
         override fun onDescriptorWriteRequest(device: BluetoothDevice, requestId: Int,
             descriptor: BluetoothGattDescriptor, preparedWrite: Boolean, responseNeeded: Boolean,
@@ -291,22 +429,26 @@ class BleGattTransport(context: Context) {
                 value.contentEquals(BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE)
             if (valid) {
                 descriptor.value = value
+                serverPeers[device.address] = device
+                readyServerPeers.add(device.address)
                 serverPeer = device
                 serverPeerReady = true
-                listener?.onConnected(try { device.name ?: device.address } catch (_: Exception) { device.address })
+                listener?.onConnected(device.address, try { device.name ?: device.address } catch (_: Exception) { device.address })
                 status("BLE çift yönlü kanal hazır; QR güven doğrulaması gerekli.")
             }
             if (responseNeeded) gattServer?.sendResponse(device, requestId,
                 if (valid) BluetoothGatt.GATT_SUCCESS else BluetoothGatt.GATT_REQUEST_NOT_SUPPORTED, offset, null)
         }
         override fun onNotificationSent(device: BluetoothDevice, statusCode: Int) {
-            notificationInFlight = false
+            val peerId = device.address
+            serverNotificationsInFlight.remove(peerId)
+            if (serverPeer?.address == peerId) notificationInFlight = false
             if (statusCode != BluetoothGatt.GATT_SUCCESS) {
-                synchronized(lock) { pendingNotifications.clear() }
-                status("BLE bildirimi gönderilemedi; aktarım kuyruğu temizlendi.")
+                serverNotificationQueues.remove(peerId)
+                status("BLE bildirimi g?nderilemedi; yaln?zca $peerId e?inin kuyru?u durduruldu.")
                 return
             }
-            notifyNext()
+            notifyNext(peerId)
         }
         override fun onCharacteristicWriteRequest(device: BluetoothDevice, requestId: Int,
             characteristic: BluetoothGattCharacteristic, preparedWrite: Boolean, responseNeeded: Boolean,
@@ -315,7 +457,7 @@ class BleGattTransport(context: Context) {
                 if (responseNeeded) gattServer?.sendResponse(device, requestId, BluetoothGatt.GATT_REQUEST_NOT_SUPPORTED, offset, null)
                 return
             }
-            val accepted = acceptFragment(value)
+            val accepted = acceptFragment(value, device.address)
             if (responseNeeded) gattServer?.sendResponse(device, requestId,
                 if (accepted) BluetoothGatt.GATT_SUCCESS else BluetoothGatt.GATT_INVALID_ATTRIBUTE_LENGTH, 0, null)
         }
@@ -323,25 +465,39 @@ class BleGattTransport(context: Context) {
 
     private val clientCallback = object : BluetoothGattCallback() {
         override fun onConnectionStateChange(g: BluetoothGatt, statusCode: Int, newState: Int) {
+            val peerId = g.device.address
             if (newState == BluetoothProfile.STATE_CONNECTED) {
+                clientGatts[peerId] = g
                 gatt = g
+                activeClientPeerId = peerId
                 g.requestMtu(247)
                 g.discoverServices()
-                status("BLE bağlı; servisler keşfediliyor.")
+                status("BLE eş oturumu bağlı; servisler keşfediliyor: $peerId")
             } else {
                 g.close()
-                if (gatt === g) gatt = null
-                listener?.onDisconnected()
-                status("BLE bağlantısı kapandı.")
+                clientGatts.remove(peerId, g)
+                clientCharacteristics.remove(peerId)
+                clientMtus.remove(peerId)
+                clientWriteQueues.remove(peerId)
+                clientWriteLocks.remove(peerId)
+                peerAssemblies.remove(peerId)
+                if (gatt === g) gatt = clientGatts.values.firstOrNull()
+                if (activeClientPeerId == peerId) activeClientPeerId = clientGatts.keys.firstOrNull()
+                listener?.onDisconnected(peerId)
+                status("BLE eş oturumu kapandı: $peerId")
             }
         }
         override fun onMtuChanged(g: BluetoothGatt, value: Int, statusCode: Int) {
-            if (statusCode == BluetoothGatt.GATT_SUCCESS) clientMtu = value
+            if (statusCode == BluetoothGatt.GATT_SUCCESS) {
+                clientMtus[g.device.address] = value
+                if (gatt === g) clientMtu = value
+            }
         }
         override fun onServicesDiscovered(g: BluetoothGatt, statusCode: Int) {
             val service = g.getService(SERVICE_UUID)
             val characteristic = service?.getCharacteristic(DATA_UUID)
             if (characteristic == null) return status("Nexora BLE GATT servisi bulunamadı.")
+            clientCharacteristics[g.device.address] = characteristic
             clientCharacteristic = characteristic
             if (characteristic.properties and BluetoothGattCharacteristic.PROPERTY_NOTIFY != 0) {
                 g.setCharacteristicNotification(characteristic, true)
@@ -357,45 +513,48 @@ class BleGattTransport(context: Context) {
             if (statusCode != BluetoothGatt.GATT_SUCCESS || descriptor.uuid != CCCD_UUID) {
                 return status("BLE bildirim aboneliği başarısız.")
             }
-            listener?.onConnected(try { g.device.name ?: g.device.address } catch (_: Exception) { g.device.address })
+            val peerId = g.device.address
+            listener?.onConnected(peerId, try { g.device.name ?: peerId } catch (_: Exception) { peerId })
             status("BLE çift yönlü kanal hazır; QR güven doğrulaması gerekli.")
         }
         override fun onCharacteristicChanged(g: BluetoothGatt, characteristic: BluetoothGattCharacteristic) {
             @Suppress("DEPRECATION")
             val value = characteristic.value ?: return
-            if (characteristic.uuid == DATA_UUID) acceptFragment(value)
+            if (characteristic.uuid == DATA_UUID) acceptFragment(value, g.device.address)
         }
         override fun onCharacteristicChanged(g: BluetoothGatt, characteristic: BluetoothGattCharacteristic, value: ByteArray) {
-            if (characteristic.uuid == DATA_UUID) acceptFragment(value)
+            if (characteristic.uuid == DATA_UUID) acceptFragment(value, g.device.address)
         }
         override fun onCharacteristicWrite(g: BluetoothGatt, characteristic: BluetoothGattCharacteristic, statusCode: Int) {
             if (statusCode != BluetoothGatt.GATT_SUCCESS) return status("BLE parçası gönderilemedi.")
-            writeNext(g, characteristic)
+            writeNextForPeer(g.device.address, g, characteristic)
         }
     }
 
-    private fun acceptFragment(frame: ByteArray): Boolean {
+    private fun acceptFragment(frame: ByteArray, peerId: String = "server"): Boolean {
         val now = android.os.SystemClock.elapsedRealtime()
-        assemblies.entries.removeIf { now - it.value.createdAtMs > ASSEMBLY_TIMEOUT_MS }
+        val peerMap = peerAssemblies.computeIfAbsent(peerId) { ConcurrentHashMap() }
+        peerMap.entries.removeIf { now - it.value.createdAtMs > ASSEMBLY_TIMEOUT_MS }
         if (frame.size < HEADER_BYTES) return false
         val buffer = ByteBuffer.wrap(frame).order(ByteOrder.BIG_ENDIAN)
-        val idBytes = ByteArray(16); buffer.get(idBytes)
+        val idBytes = ByteArray(16)
+        buffer.get(idBytes)
         val id = idBytes.joinToString("") { "%02x".format(it) }
         val index = buffer.short.toInt() and 0xffff
         val total = buffer.short.toInt() and 0xffff
         val payloadSize = buffer.short.toInt() and 0xffff
         if (total == 0 || index >= total || payloadSize != frame.size - HEADER_BYTES) return false
-        var assembly = assemblies[id]
+        var assembly = peerMap[id]
         if (assembly == null) {
-            if (assemblies.size >= MAX_INCOMPLETE) return false
+            if (peerMap.size >= MAX_INCOMPLETE) return false
             assembly = Assembly(total)
-            assemblies[id] = assembly
+            peerMap[id] = assembly
         }
-        if (assembly.count != total) { assemblies.remove(id); return false }
+        if (assembly.count != total) { peerMap.remove(id); return false }
         val chunk = frame.copyOfRange(HEADER_BYTES, frame.size)
         val previous = assembly.chunks[index]
         if (previous != null) return previous.contentEquals(chunk)
-        if (assembly.bytes + chunk.size > MAX_ENVELOPE) { assemblies.remove(id); return false }
+        if (assembly.bytes + chunk.size > MAX_ENVELOPE) { peerMap.remove(id); return false }
         assembly.chunks[index] = chunk
         assembly.bytes += chunk.size
         if (assembly.chunks.size != assembly.count) return true
@@ -404,33 +563,45 @@ class BleGattTransport(context: Context) {
             val bytes = assembly.chunks[part] ?: return false
             output.write(bytes)
         }
-        assemblies.remove(id)
+        peerMap.remove(id)
         val packet = output.toByteArray()
         if (packet.isEmpty() || packet.size > MAX_ENVELOPE) return false
-        listener?.onPacket(packet)
+        listener?.onPacketFromPeer(peerId, packet)
         return true
     }
 
-    private fun notifyNext() {
-        val peer = serverPeer ?: return
+    private fun notifyNext(peerId: String? = null) {
+        val targetId = peerId ?: readyServerPeers.firstOrNull() ?: return
+        val peer = serverPeers[targetId] ?: return
         val characteristic = serverCharacteristic ?: return
-        val next = synchronized(lock) {
-            if (!serverPeerReady || notificationInFlight || pendingNotifications.isEmpty()) null
-            else pendingNotifications.removeFirst().also { notificationInFlight = true }
-        } ?: return
+        if (targetId !in readyServerPeers || !serverNotificationsInFlight.add(targetId)) return
+        val queue = serverNotificationQueues[targetId] ?: run {
+            serverNotificationsInFlight.remove(targetId)
+            return
+        }
+        val peerLock = serverNotificationLocks[targetId] ?: run {
+            serverNotificationsInFlight.remove(targetId)
+            return
+        }
+        val next = synchronized(peerLock) { if (queue.isEmpty()) null else queue.removeFirst() }
+        if (next == null) {
+            serverNotificationsInFlight.remove(targetId)
+            return
+        }
         try {
             @Suppress("DEPRECATION")
             characteristic.value = next
             @Suppress("DEPRECATION")
             val accepted = gattServer?.notifyCharacteristicChanged(peer, characteristic, false) == true
             if (!accepted) {
-                notificationInFlight = false
-                synchronized(lock) { pendingNotifications.addFirst(next) }
-                status("BLE bildirimi kuyruğa geri alındı; bağlantı hazır değil.")
+                serverNotificationsInFlight.remove(targetId)
+                synchronized(peerLock) { queue.addFirst(next) }
+                status("BLE bildirimi $targetId kuyru?una geri al?nd?; ba?lant? haz?r de?il.")
             }
         } catch (_: Exception) {
-            notificationInFlight = false
-            status("BLE bildirimi gönderilirken hata oluştu.")
+            serverNotificationsInFlight.remove(targetId)
+            synchronized(peerLock) { queue.addFirst(next) }
+            status("BLE bildirimi g?nderilirken hata olu?tu: $targetId")
         }
     }
 

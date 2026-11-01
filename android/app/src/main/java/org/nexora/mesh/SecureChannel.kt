@@ -42,6 +42,15 @@ class SecureChannel private constructor(private val key: ByteArray) {
     fun deriveHopKey(localNodeId: ByteArray, remoteNodeId: ByteArray, epoch: Long): ByteArray? =
         NativeMesh.deriveHopKey(key, localNodeId, remoteNodeId, epoch)
 
+    /** Cross-platform stable IDs: SHA-256(public-key DER), truncated to 16 bytes. */
+    fun deriveHopKeyForPublicKeys(localPublicKeyDer: ByteArray, remotePublicKeyDer: ByteArray, epoch: Long): ByteArray? {
+        if (localPublicKeyDer.isEmpty() || remotePublicKeyDer.isEmpty()) return null
+        val digest = MessageDigest.getInstance("SHA-256")
+        val localId = digest.digest(localPublicKeyDer).copyOf(16)
+        val remoteId = digest.digest(remotePublicKeyDer).copyOf(16)
+        return deriveHopKey(localId, remoteId, epoch)
+    }
+
     fun decrypt(sealed: Sealed, associatedData: ByteArray = byteArrayOf()): ByteArray {
         require(sealed.nonce.size == 12) { "Invalid AES-GCM nonce" }
         val cipher = Cipher.getInstance("AES/GCM/NoPadding")

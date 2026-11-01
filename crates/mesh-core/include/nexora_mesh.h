@@ -9,6 +9,10 @@ extern "C" {
 intptr_t nm_derive_hop_key(const uint8_t *shared_secret, size_t secret_len,
     const uint8_t *peer_a, const uint8_t *peer_b, uint64_t epoch,
     uint8_t *output, size_t output_capacity);
+/* Encode a v1 store-forward envelope around already encrypted ciphertext. */
+intptr_t nm_wire_encode(const uint8_t *message_id, const uint8_t *destination_token,
+    uint8_t hops_remaining, uint64_t expires_at_unix, const uint8_t *ciphertext,
+    size_t ciphertext_len, uint8_t *output, size_t output_capacity);
 /* Returns 0 for a valid v1 envelope, otherwise a negative error code. */
 int32_t nm_wire_validate(const uint8_t *input, size_t input_len);
 /* Returns output length, a negative error, or required capacity if too small.

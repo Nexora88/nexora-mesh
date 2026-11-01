@@ -2,6 +2,7 @@ import SwiftUI
 import CoreImage.CIFilterBuiltins
 import UIKit
 import VisionKit
+import Security
 
 private enum MeshPalette {
     static let background = Color(red: 7 / 255, green: 17 / 255, blue: 15 / 255)
@@ -43,7 +44,10 @@ private struct ChatItem: Identifiable {
 
 struct MeshRootView: View {
     @StateObject private var bleTransport = MeshBLETransport()
-    @StateObject private var secureChat = MeshSecureChat()
+    @StateObject private var peerSessions = MeshPeerSessionRegistry()
+    private var secureChat: MeshSecureChat {
+        activeBLEPeerID.map { peerSessions.session(for: $0) } ?? peerSessions.fallback
+    }
     @State private var selectedTab: MeshTab = .chats
     @State private var selectedChat: ChatItem?
     @State private var qrPayloadInput = ""
@@ -51,6 +55,7 @@ struct MeshRootView: View {
     @State private var showQRScanner = false
     @State private var relayStore = MeshRelayStore()
     @State private var relayOptIn = false
+    @State private var activeBLEPeerID: UUID?
 
 
     var body: some View {
@@ -78,7 +83,7 @@ struct MeshRootView: View {
                 qrPayloadInput = payload
                 showQRScanner = false
                 do {
-                    try secureChat.trustQRPayload(payload)
+                    try peerSessions.trustQRPayload(payload)
                     qrTrustStatus = secureChat.status
                 } catch {
                     qrTrustStatus = "QR reddedildi: biçim veya parmak izi doğrulanamadı."
@@ -89,15 +94,116 @@ struct MeshRootView: View {
         .onAppear {
             relayOptIn = relayStore.isOptedIn
             bleTransport.onPacket = { packet in
-                if relayStore.isOptedIn { _ = relayStore.enqueue(packet) }
-                DispatchQueue.main.async { secureChat.receive(packet) }
+                DispatchQueue.main.async { _ = peerSessions.fallback.receive(packet) }
+            }
+            bleTransport.onPeerReady = { peerID in
+                DispatchQueue.main.async {
+                    if activeBLEPeerID == nil { activeBLEPeerID = peerID }
+                    let session = peerSessions.session(for: peerID)
+                    session.onSecureReady = { forwardStoredToPeer(peerID) }
+                    session.attach { packet in
+                        if relayStore.isOptedIn, MeshCoreBridge.inspectEnvelope(packet) != nil {
+                            _ = relayStore.enqueue(packet)
+                        }
+                        bleTransport.send(envelope: packet, toPeer: peerID)
+                    }
+                    forwardStoredToPeer(peerID)
+                }
+            }
+            bleTransport.onPacketFromPeer = { peerID, packet in
+                DispatchQueue.main.async { handleBLEPacket(peerID: peerID, packet: packet) }
+            }
+            bleTransport.onPeerDisconnected = { peerID in
+                DispatchQueue.main.async {
+                    peerSessions.removeSession(for: peerID)
+                    if activeBLEPeerID == peerID {
+                        activeBLEPeerID = bleTransport.connectedPeerIDs.first
+                    }
+                }
             }
         }
-        .onChange(of: bleTransport.status) { _, newStatus in
-            if newStatus.contains("BLE veri kanalı hazır") || newStatus.contains("Bir BLE istemcisi bildirimlere abone oldu") {
-                secureChat.attach { packet in bleTransport.send(envelope: packet) }
-            }
+    }
+
+    private let hopKeyEpoch: UInt64 = 1
+
+    private func forwardStoredToPeer(_ peerID: UUID) {
+        guard relayStore.isOptedIn,
+              let nextContext = peerSessions.session(for: peerID).currentHopContext(epoch: hopKeyEpoch) else { return }
+        let now = UInt64(Date().timeIntervalSince1970)
+        for messageID in relayStore.pendingMessageIDs() {
+            guard let previousHop = relayStore.lastHopNodeID(messageID: messageID),
+                  previousHop != nextContext.remoteNodeID else { continue }
+            guard let forwarded = relayStore.peekForNextHop(messageID: messageID, nowUnixSeconds: now) else { continue }
+            bleTransport.send(envelope: forwarded, toPeer: peerID)
+            return
         }
+    }
+
+    private func forwardStoredFrom(sourcePeerID: UUID, messageID: Data) {
+        guard relayStore.isOptedIn,
+              let previousHop = relayStore.lastHopNodeID(messageID: messageID) else { return }
+        let now = UInt64(Date().timeIntervalSince1970)
+        for nextPeerID in bleTransport.connectedPeerIDs where nextPeerID != sourcePeerID {
+            let nextSession = peerSessions.session(for: nextPeerID)
+            guard let nextContext = nextSession.currentHopContext(epoch: hopKeyEpoch),
+                  nextContext.remoteNodeID != previousHop,
+                  let forwarded = relayStore.peekForNextHop(messageID: messageID, nowUnixSeconds: now) else { continue }
+            bleTransport.send(envelope: forwarded, toPeer: nextPeerID)
+            return
+        }
+    }
+
+    private func handleBLEPacket(peerID: UUID, packet: Data) {
+        let session = peerSessions.session(for: peerID)
+        let now = UInt64(Date().timeIntervalSince1970)
+        let hopContext = session.currentHopContext(epoch: hopKeyEpoch)
+
+        if packet.count == 105, let hopContext,
+           MeshCoreBridge.verifyStoreAck(packet, hopKey: hopContext.hopKey,
+                expectedFrom: hopContext.remoteNodeID, expectedTo: hopContext.localNodeID,
+                nowUnixSeconds: now, maxAgeSeconds: 300) {
+            _ = relayStore.acknowledgeStoredByNextHop(ack: packet, hopKey: hopContext.hopKey,
+                expectedFrom: hopContext.remoteNodeID, expectedTo: hopContext.localNodeID,
+                nowUnixSeconds: now, maxAgeSeconds: 300)
+            forwardStoredToPeer(peerID)
+            return
+        }
+
+        if let envelope = MeshCoreBridge.inspectEnvelope(packet) {
+            guard let inner = (try? JSONSerialization.jsonObject(with: envelope.ciphertext)) as? [String: Any],
+                  let type = inner["t"] as? String, type == "DATA" || type == "ACK",
+                  let idText = (type == "ACK" ? inner["relayId"] as? String : inner["id"] as? String),
+                  let uuid = UUID(uuidString: idText),
+                  let destinationText = inner["toNode"] as? String,
+                  let innerDestination = Data(base64Encoded: destinationText) else { return }
+            var uuidBytes = uuid.uuid
+            let expectedMessageID = withUnsafeBytes(of: &uuidBytes) { Data($0) }
+            guard expectedMessageID == envelope.messageID,
+                  innerDestination == envelope.destinationToken,
+                  envelope.expiresAtUnix > now else { return }
+            var stored = false
+            if relayStore.isOptedIn, let hopContext {
+                _ = relayStore.enqueue(packet, fromNodeID: hopContext.remoteNodeID)
+                var nonce = Data(count: 16)
+                _ = nonce.withUnsafeMutableBytes { SecRandomCopyBytes(kSecRandomDefault, 16, $0.baseAddress!) }
+                if let ack = relayStore.createStoredAck(envelope: packet,
+                    fromNode: hopContext.localNodeID, toNode: hopContext.remoteNodeID,
+                    hopKey: hopContext.hopKey, nowUnixSeconds: now, nonce: nonce) {
+                    bleTransport.send(envelope: ack, toPeer: peerID)
+                    stored = true
+                }
+            }
+
+            if let localID = session.localNodeID(), envelope.destinationToken == localID {
+                let delivered = session.receive(envelope.ciphertext)
+                if delivered && stored { _ = relayStore.removeDeliveredLocally(messageID: envelope.messageID) }
+            } else if stored {
+                forwardStoredFrom(sourcePeerID: peerID, messageID: envelope.messageID)
+            }
+            return
+        }
+
+        _ = session.receive(packet)
     }
 
     private var header: some View {
@@ -151,7 +257,7 @@ struct MeshRootView: View {
                         initials: String(contact.label.prefix(2)).uppercased()
                     )
                     Button {
-                        secureChat.selectRecipient(contact.fingerprint)
+                        peerSessions.selectRecipient(contact.fingerprint)
                         selectedChat = chat
                     } label: {
                         HStack(spacing: 12) {
@@ -192,6 +298,7 @@ struct MeshRootView: View {
                 .foregroundStyle(MeshPalette.muted)
             ForEach(Array(bleTransport.discoveredNames.keys), id: \.self) { id in
                 Button {
+                    activeBLEPeerID = id
                     bleTransport.connect(to: id)
                 } label: {
                     HStack {
@@ -214,7 +321,7 @@ struct MeshRootView: View {
                 }
                 .buttonStyle(.plain)
             }
-            infoCard("Mesajlaşma güvenliği", "Bu GATT katmanı taşıma prototipidir. Bu ekran henüz sohbet mesajlarını Rust zarfına bağlamaz; QR doğrulaması ve uygulama katmanı şifreleme zorunlu olmadan özel mesaj gönderimi yapılmamalıdır.", symbol: "lock.shield")
+            infoCard("Mesajlaşma güvenliği", "DATA ve teslim onayları Rust zarfı içinde taşınır. Ara cihazlar yalnızca hedefe ait şifreli içeriği saklar ve iletir; her BLE atlaması için ayrı doğrulanmış STORE_ACK anahtarı kullanılır.", symbol: "lock.shield")
             Spacer()
         }
         .padding(.horizontal, 18)
@@ -231,7 +338,7 @@ struct MeshRootView: View {
                 Toggle(isOn: $relayOptIn) {
                     VStack(alignment: .leading, spacing: 4) {
                         Text("Bu cihazın şifreli paketleri saklamasına izin ver").foregroundStyle(.white)
-                        Text("Yalnızca doğrulanmış Rust zarfları Keychain'de saklanır. Canlı A→B→C aktarımı henüz tamamlanmadı. Kuyruk: \\(relayStore.pendingCount())")
+                        Text("Yalnızca doğrulanmış Rust zarfları Keychain'de saklanır; kalıcı saklama ve eşe özel STORE_ACK kullanılır. Kuyruk: \\(relayStore.pendingCount())")
                             .font(.caption).foregroundStyle(MeshPalette.muted)
                     }
                 }

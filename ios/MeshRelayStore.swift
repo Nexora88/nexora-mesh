@@ -7,11 +7,13 @@ final class MeshRelayStore {
     private struct Record: Codable {
         let id: String
         let envelope: Data
+        let lastHopNodeID: Data?
     }
 
     private let service = "org.nexora.mesh.relay.v1"
     private let queueAccount = "opaque-envelope-queue"
     private let seenAccount = "seen-message-ids"
+    private let receiptsAccount = "stored-receipts"
     private let optInAccount = "relay-opt-in"
     private let lock = NSLock()
     private let maximumItems = 128
@@ -23,7 +25,10 @@ final class MeshRelayStore {
             lock.lock()
             defer { lock.unlock() }
             try? write(Data([newValue ? 1 : 0]), account: optInAccount)
-            if !newValue { try? write(try JSONEncoder().encode([Record]()), account: queueAccount) }
+            if !newValue {
+                try? write(try JSONEncoder().encode([Record]()), account: queueAccount)
+                try? write(try JSONEncoder().encode([Record]()), account: receiptsAccount)
+            }
         }
     }
 
@@ -34,16 +39,17 @@ final class MeshRelayStore {
     }
 
     @discardableResult
-    func enqueue(_ envelope: Data) -> Bool {
+    func enqueue(_ envelope: Data, fromNodeID: Data? = nil) -> Bool {
         lock.lock()
         defer { lock.unlock() }
-        guard isOptedIn, envelope.count >= 49, envelope.count <= MeshCoreBridge.maxEnvelopeBytes else { return false }
+        guard isOptedIn, envelope.count >= 49, envelope.count <= MeshCoreBridge.maxEnvelopeBytes,
+              fromNodeID == nil || fromNodeID?.count == 16 else { return false }
         do { try MeshCoreBridge.validate(envelope) } catch { return false }
         let id = envelope[3..<19].map { String(format: "%02x", $0) }.joined()
         guard var queue = try? loadQueue(), !queue.contains(where: { $0.id == id }),
               queue.count < maximumItems else { return false }
         guard var seen = try? loadSeen(), !seen.contains(id) else { return false }
-        queue.append(Record(id: id, envelope: envelope))
+        queue.append(Record(id: id, envelope: envelope, lastHopNodeID: fromNodeID))
         seen.append(id)
         if seen.count > maximumSeen { seen.removeFirst(seen.count - maximumSeen) }
         do {
@@ -65,6 +71,47 @@ final class MeshRelayStore {
         return (item.id, forwarded)
     }
 
+    /// Return a hop-decremented copy for a selected message ID.
+    func peekForNextHop(messageID: Data, nowUnixSeconds: UInt64) -> Data? {
+        lock.lock()
+        defer { lock.unlock() }
+        guard isOptedIn, messageID.count == 16,
+              let items = try? loadQueue(),
+              let item = items.first(where: { $0.id == messageID.map { String(format: "%02x", $0) }.joined() }) else { return nil }
+        return try? MeshCoreBridge.forward(item.envelope, nowUnixSeconds: nowUnixSeconds)
+    }
+
+    func pendingMessageIDs() -> [Data] {
+        lock.lock()
+        defer { lock.unlock() }
+        return ((try? loadQueue()) ?? []).map { $0.envelope.subdata(in: 3..<19) }
+    }
+
+    func lastHopNodeID(messageID: Data) -> Data? {
+        lock.lock()
+        defer { lock.unlock() }
+        let id = messageID.map { String(format: "%02x", $0) }.joined()
+        return ((try? loadQueue()) ?? []).first(where: { $0.id == id })?.lastHopNodeID
+            ?? ((try? loadReceipts()) ?? []).first(where: { $0.id == id })?.lastHopNodeID
+    }
+
+    func removeDeliveredLocally(messageID: Data) -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        let id = messageID.map { String(format: "%02x", $0) }.joined()
+        guard var queue = try? loadQueue(), let index = queue.firstIndex(where: { $0.id == id }) else { return false }
+        let record = queue.remove(at: index)
+        var receipts = (try? loadReceipts()) ?? []
+        receipts.removeAll { $0.id == id }
+        receipts.append(record)
+        if receipts.count > 512 { receipts.removeFirst(receipts.count - 512) }
+        do {
+            try write(try JSONEncoder().encode(queue), account: queueAccount)
+            try write(try JSONEncoder().encode(receipts), account: receiptsAccount)
+            return true
+        } catch { return false }
+    }
+
     /// Remove only after the next device confirms durable storage of this envelope.
     @discardableResult
     private func acknowledgeStoredByNextHop(messageID: String) -> Bool {
@@ -72,8 +119,16 @@ final class MeshRelayStore {
         defer { lock.unlock() }
         guard var queue = try? loadQueue(),
               let index = queue.firstIndex(where: { $0.id == messageID.lowercased() }) else { return false }
-        queue.remove(at: index)
-        return (try? write(try JSONEncoder().encode(queue), account: queueAccount)) != nil
+        let record = queue.remove(at: index)
+        var receipts = (try? loadReceipts()) ?? []
+        receipts.removeAll { $0.id == record.id }
+        receipts.append(record)
+        if receipts.count > 512 { receipts.removeFirst(receipts.count - 512) }
+        do {
+            try write(try JSONEncoder().encode(queue), account: queueAccount)
+            try write(try JSONEncoder().encode(receipts), account: receiptsAccount)
+            return true
+        } catch { return false }
     }
 
     /// Create a STORE_ACK only after enqueue() has committed the opaque envelope.
@@ -85,7 +140,9 @@ final class MeshRelayStore {
         do { try MeshCoreBridge.validate(envelope) } catch { return nil }
         let messageID = envelope.subdata(in: 3..<19)
         let id = messageID.map { String(format: "%02x", $0) }.joined()
-        guard (try? loadQueue().contains(where: { $0.id == id && $0.envelope == envelope })) == true else {
+        let inQueue = (try? loadQueue().contains(where: { $0.id == id && $0.envelope == envelope })) == true
+        let inReceipts = (try? loadReceipts().contains(where: { $0.id == id && $0.envelope == envelope })) == true
+        guard inQueue || inReceipts else {
             return nil
         }
         return MeshCoreBridge.createStoreAck(messageID: messageID, fromNode: fromNode,
@@ -106,6 +163,11 @@ final class MeshRelayStore {
 
     private func loadQueue() throws -> [Record] {
         guard let data = try? read(queueAccount) else { return [] }
+        return try JSONDecoder().decode([Record].self, from: data)
+    }
+
+    private func loadReceipts() throws -> [Record] {
+        guard let data = try? read(receiptsAccount) else { return [] }
         return try JSONDecoder().decode([Record].self, from: data)
     }
 
