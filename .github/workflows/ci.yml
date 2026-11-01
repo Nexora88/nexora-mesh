@@ -38,6 +38,8 @@ jobs:
         with:
           distribution: temurin
           java-version: "17"
+      - name: Require Android SDK license approval
+        run: test "${{ vars.ANDROID_SDK_LICENSES_ACCEPTED }}" = "true"
       - uses: android-actions/setup-android@v4
         with:
           accept-android-sdk-licenses: true
