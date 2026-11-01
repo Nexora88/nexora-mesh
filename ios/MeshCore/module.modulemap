@@ -1,0 +1,4 @@
+module MeshCore {
+    header "../../crates/mesh-core/include/nexora_mesh.h"
+    export *
+}

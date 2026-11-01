@@ -1,7 +1,13 @@
 name: CI
+
+concurrency:
+  # Keep push and pull_request runs separate for PR branches.
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: true
+
 on:
   push:
-    branches: [main, "work/**"]
+    branches: [main, "work/**", "feat/**"]
   pull_request:
 permissions:
   contents: read
@@ -20,19 +26,33 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android,x86_64-linux-android
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: "17"
       - uses: android-actions/setup-android@v3
         with:
-          packages: |
-            platforms;android-35
-            build-tools;35.0.0
+          packages: platform-tools
+      - run: sdkmanager "platforms;android-35" "build-tools;35.0.0" "ndk;27.2.12479018" "cmake;3.22.1"
+      - name: Install cargo-ndk
+        run: cargo install cargo-ndk --locked
+      - name: Build Rust mesh-core for Android ABIs
+        run: cargo ndk -t arm64-v8a -t x86_64 -o android/app/src/main/jniLibs build --release -p mesh-core
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: "8.9"
+      - run: gradle -p android testDebugUnitTest
       - run: gradle -p android assembleDebug
+      - name: Upload installable debug APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: nexora-mesh-android-debug
+          path: android/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+          retention-days: 14
   python:
     runs-on: ubuntu-latest
     steps:
@@ -41,3 +61,47 @@ jobs:
         with:
           python-version: "3.12"
       - run: python tools/tests/test_codec_vectors.py
+      - run: python tools/tests/test_crypto_vectors.py
+      - run: python tools/tests/test_pwa_shell.py
+
+  ios-native:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-ios,aarch64-apple-ios-sim,x86_64-apple-ios
+      - name: Build Rust XCFramework
+        run: bash scripts/build-ios-xcframework.sh
+      - name: Generate Xcode project
+        run: |
+          brew install xcodegen
+          cd ios
+          xcodegen generate --spec project.yml
+      - name: Build iOS app for Simulator
+        run: |
+          xcodebuild \
+            -project ios/NexoraMesh.xcodeproj \
+            -scheme NexoraMesh \
+            -sdk iphonesimulator \
+            -configuration Debug \
+            -destination 'generic/platform=iOS Simulator' \
+            CODE_SIGNING_ALLOWED=NO \
+            build
+      - name: Run iOS native crypto and malformed-packet tests
+        run: |
+          DEVICE_ID="$(xcrun simctl list devices available | grep -m1 'iPhone' | sed -E 's/.*\(([A-F0-9-]{36})\).*/\1/')"
+          test -n "$DEVICE_ID"
+          xcodebuild \
+            -project ios/NexoraMesh.xcodeproj \
+            -scheme NexoraMesh \
+            -destination "platform=iOS Simulator,id=$DEVICE_ID" \
+            CODE_SIGNING_ALLOWED=NO \
+            test
+      - name: Upload iOS Rust XCFramework
+        uses: actions/upload-artifact@v4
+        with:
+          name: nexora-mesh-ios-xcframework
+          path: dist/ios/MeshCore.xcframework
+          if-no-files-found: error
+          retention-days: 14
