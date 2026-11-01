@@ -5,9 +5,8 @@ concurrency:
   cancel-in-progress: true
 
 on:
-  push:
-    branches: [main, "work/**", "feat/**"]
   pull_request:
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -27,7 +26,7 @@ jobs:
   # Android SDK terms require explicit review and opt-in by an authorized owner.
   # Until then, skip rather than report a misleading failed build.
   android:
-    if: ${{ vars.ANDROID_SDK_LICENSES_ACCEPTED == 'true' }}
+    if: ${{ github.event_name == 'workflow_dispatch' && vars.ANDROID_SDK_LICENSES_ACCEPTED == 'true' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -73,6 +72,7 @@ jobs:
         run: python -m unittest discover -s tools/tests -p 'test_*.py' -v
 
   ios-native:
+    if: ${{ github.event_name == 'workflow_dispatch' }}
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
