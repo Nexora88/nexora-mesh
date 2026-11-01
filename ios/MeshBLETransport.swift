@@ -422,7 +422,7 @@ extension MeshBLETransport: CBPeripheralManagerDelegate {
 
 private extension UInt8 {
     func clamped(to range: ClosedRange<UInt8>) -> UInt8 {
-        min(max(self, range.lowerBound), range.upperBound)
+        Swift.min(Swift.max(self, range.lowerBound), range.upperBound)
     }
 }
 
