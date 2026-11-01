@@ -58,3 +58,20 @@ jobs:
           path: desktop/src-tauri/target/release/bundle/**
           if-no-files-found: error
           retention-days: 14
+
+  pwa:
+    name: Installable PWA bundle
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Package installable web shell
+        run: |
+          cd web
+          zip -r ../nexora-mesh-pwa.zip .
+      - name: Upload PWA source bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: nexora-mesh-pwa
+          path: nexora-mesh-pwa.zip
+          if-no-files-found: error
+          retention-days: 30

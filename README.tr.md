@@ -89,3 +89,14 @@ Ayrıntılar: docs/PRODUCT_VISION.md, docs/PROTOCOL.md, docs/RELAY_ROUTING.md, d
 ## Gizlilik ve güvenlik durumu
 
 Android BLE GATT aktarımı ayrı bir prototiptir; QR güveni ve şifreli sohbet protokolüne uçtan uca bağlanmış değildir. Mevcut doğrudan sohbet yolu Bluetooth Classic RFCOMM kullanır. Relay kuyruk/depo bileşenleri henüz kimliği doğrulanmış çok atlamalı teslimat sistemi değildir. iOS yalnızca taşıma katmanıdır; Android↔iOS şifreli sohbet, ileriye dönük gizlilik (forward secrecy), fiziksel birlikte çalışabilirlik testleri ve bağımsız güvenlik incelemesi tamamlanmamıştır. [Gizlilik/güvenlik tehdit modelini](docs/PRIVACY_SECURITY.md) ve [platformlar arası taşıma durumunu](docs/CROSS_PLATFORM_TRANSPORT.md) incele. Bu prototipi acil durum garantisi veya çok hassas iletişim için kullanma.
+
+
+## Web, Android ve masaustu paketleri
+
+- `web/` kurulabilir PWA arayuzudur. Tarayici uzerinden kisi etiketleri ve taslaklar yerel tutulur; web arayuzu tek basina Bluetooth mesaj gondermez.
+- Tauri masaustu paketi Windows icin MSI/NSIS, macOS icin DMG/APP ve Linux icin DEB/AppImage hedeflerini tanimlar.
+- `.github/workflows/desktop-native.yml` ana dala gelen degisikliklerde uc masaustu platformu icin paket ve indirilebilir Actions artefakti olusturmayi hedefler.
+- Android CI, Rust cekirdegini Android ABI'leri icin derler, birim testlerini calistirir ve debug APK artefakti yukler. Etiket tabanli APK akisina da ayni Rust/NDK adimlari eklendi.
+- iOS derlemesi macOS/Xcode gerektirir; fiziksel iPhone ve Android cihazlariyla Bluetooth birlikte calisma testi ayri olarak yapilmalidir.
+
+Paketin uretilmis olmasi, Bluetooth aktariminin veya uctan uca guvenligin fiziksel cihazlarda dogrulandigi anlamina gelmez. Actions artefaktlari yalnizca ilgili is akisi basarili tamamlandiginda indirilebilir olur.
