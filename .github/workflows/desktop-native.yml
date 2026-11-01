@@ -1,9 +1,13 @@
 name: Desktop Native Build
 
+concurrency:
+  group: nexora-mesh-desktop-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 on:
   pull_request:
   push:
-    branches: ["**"]
+    branches: ["main"]
   workflow_dispatch:
 
 permissions:

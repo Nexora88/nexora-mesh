@@ -1,7 +1,12 @@
 name: CI
+
+concurrency:
+  group: nexora-mesh-ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 on:
   push:
-    branches: [main, "work/**", "feat/**"]
+    branches: [main, "work/**"]
   pull_request:
 permissions:
   contents: read
