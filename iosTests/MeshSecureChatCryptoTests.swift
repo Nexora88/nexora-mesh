@@ -78,6 +78,39 @@ final class MeshSecureChatCryptoTests: XCTestCase {
         ))
     }
 
+
+    func testRustStoreAckBridgeAuthenticatesHopAndRejectsTampering() {
+        let messageID = Data(repeating: 0x07, count: 16)
+        let fromNode = Data(repeating: 0x08, count: 16)
+        let toNode = Data(repeating: 0x09, count: 16)
+        let nonce = Data(repeating: 0x0A, count: 16)
+        let hopKey = Data(repeating: 0x0B, count: 32)
+        let ack = MeshCoreBridge.createStoreAck(
+            messageID: messageID, fromNode: fromNode, toNode: toNode,
+            storedAtUnixSeconds: 100, nonce: nonce, hopKey: hopKey
+        )
+        XCTAssertNotNil(ack)
+        guard let ack else { return }
+        XCTAssertTrue(MeshCoreBridge.verifyStoreAck(
+            ack, hopKey: hopKey, expectedFrom: fromNode, expectedTo: toNode,
+            nowUnixSeconds: 101, maxAgeSeconds: 30
+        ))
+        XCTAssertFalse(MeshCoreBridge.verifyStoreAck(
+            ack, hopKey: hopKey, expectedFrom: toNode, expectedTo: fromNode,
+            nowUnixSeconds: 101, maxAgeSeconds: 30
+        ))
+        var tampered = ack
+        tampered[tampered.count - 1] ^= 0x01
+        XCTAssertFalse(MeshCoreBridge.verifyStoreAck(
+            tampered, hopKey: hopKey, expectedFrom: fromNode, expectedTo: toNode,
+            nowUnixSeconds: 101, maxAgeSeconds: 30
+        ))
+        XCTAssertNil(MeshCoreBridge.createStoreAck(
+            messageID: messageID, fromNode: fromNode, toNode: toNode,
+            storedAtUnixSeconds: 100, nonce: nonce, hopKey: Data(repeating: 1, count: 16)
+        ))
+    }
+
     func testMalformedWirePacketDoesNotCreateMessage() {
         let chat = MeshSecureChat()
         chat.receive(Data("not-json".utf8))

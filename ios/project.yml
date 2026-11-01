@@ -25,6 +25,7 @@ targets:
       - path: NexoraMeshApp.swift
       - path: QRScannerSheet.swift
     info:
+      path: Info.plist
       properties:
         UIBackgroundModes:
           - bluetooth-central
