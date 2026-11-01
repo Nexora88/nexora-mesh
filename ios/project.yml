@@ -17,9 +17,13 @@ targets:
     type: application
     platform: iOS
     sources:
-      - path: .
-        includes:
-          - "*.swift"
+      - path: MeshBLETransport.swift
+      - path: MeshCoreBridge.swift
+      - path: MeshRadioManager.swift
+      - path: MeshRelayStore.swift
+      - path: MeshSecureChat.swift
+      - path: NexoraMeshApp.swift
+      - path: QRScannerSheet.swift
     info:
       properties:
         UIBackgroundModes:
@@ -39,7 +43,7 @@ targets:
     type: bundle.unit-test
     platform: iOS
     sources:
-      - path: ../iosTests
+      - path: ../iosTests/MeshSecureChatCryptoTests.swift
     dependencies:
       - target: NexoraMesh
     settings:

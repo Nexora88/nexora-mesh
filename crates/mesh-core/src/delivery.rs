@@ -48,7 +48,12 @@ impl StoreAck {
             return Err(AckError::WeakHopKey);
         }
         let mut ack = Self {
-            message_id, from_node, to_node, stored_at_unix, nonce, mac: [0; 32],
+            message_id,
+            from_node,
+            to_node,
+            stored_at_unix,
+            nonce,
+            mac: [0; 32],
         };
         let mut mac = HmacSha256::new_from_slice(hop_key).map_err(|_| AckError::WeakHopKey)?;
         mac.update(ACK_DOMAIN);
@@ -80,7 +85,8 @@ impl StoreAck {
         let mut mac = HmacSha256::new_from_slice(hop_key).map_err(|_| AckError::WeakHopKey)?;
         mac.update(ACK_DOMAIN);
         mac.update(&self.body());
-        mac.verify_slice(&self.mac).map_err(|_| AckError::InvalidMac)
+        mac.verify_slice(&self.mac)
+            .map_err(|_| AckError::InvalidMac)
     }
 
     pub fn encode(&self) -> [u8; STORE_ACK_LEN] {
@@ -91,15 +97,31 @@ impl StoreAck {
     }
 
     pub fn decode(bytes: &[u8]) -> Result<Self, AckError> {
-        if bytes.len() != STORE_ACK_LEN { return Err(AckError::InvalidLength); }
-        if bytes[0] != ACK_VERSION { return Err(AckError::UnsupportedVersion); }
-        let mut message_id = [0; 16]; message_id.copy_from_slice(&bytes[1..17]);
-        let mut from_node = [0; 16]; from_node.copy_from_slice(&bytes[17..33]);
-        let mut to_node = [0; 16]; to_node.copy_from_slice(&bytes[33..49]);
+        if bytes.len() != STORE_ACK_LEN {
+            return Err(AckError::InvalidLength);
+        }
+        if bytes[0] != ACK_VERSION {
+            return Err(AckError::UnsupportedVersion);
+        }
+        let mut message_id = [0; 16];
+        message_id.copy_from_slice(&bytes[1..17]);
+        let mut from_node = [0; 16];
+        from_node.copy_from_slice(&bytes[17..33]);
+        let mut to_node = [0; 16];
+        to_node.copy_from_slice(&bytes[33..49]);
         let stored_at_unix = u64::from_be_bytes(bytes[49..57].try_into().expect("fixed length"));
-        let mut nonce = [0; 16]; nonce.copy_from_slice(&bytes[57..73]);
-        let mut mac = [0; 32]; mac.copy_from_slice(&bytes[73..105]);
-        Ok(Self { message_id, from_node, to_node, stored_at_unix, nonce, mac })
+        let mut nonce = [0; 16];
+        nonce.copy_from_slice(&bytes[57..73]);
+        let mut mac = [0; 32];
+        mac.copy_from_slice(&bytes[73..105]);
+        Ok(Self {
+            message_id,
+            from_node,
+            to_node,
+            stored_at_unix,
+            nonce,
+            mac,
+        })
     }
 
     fn body(&self) -> [u8; ACK_BODY_LEN] {
@@ -123,16 +145,23 @@ pub struct RetryPolicy {
 
 impl Default for RetryPolicy {
     fn default() -> Self {
-        Self { base_delay_seconds: 2, max_delay_seconds: 300, max_attempts: 8 }
+        Self {
+            base_delay_seconds: 2,
+            max_delay_seconds: 300,
+            max_attempts: 8,
+        }
     }
 }
 
 impl RetryPolicy {
     /// Exponential delay; callers should add bounded random jitter before scheduling.
     pub fn delay_seconds(&self, completed_attempts: u8) -> u64 {
-        if completed_attempts == 0 { return 0; }
+        if completed_attempts == 0 {
+            return 0;
+        }
         let shift = u32::from(completed_attempts.saturating_sub(1).min(63));
-        self.base_delay_seconds.saturating_mul(1u64.checked_shl(shift).unwrap_or(u64::MAX))
+        self.base_delay_seconds
+            .saturating_mul(1u64.checked_shl(shift).unwrap_or(u64::MAX))
             .min(self.max_delay_seconds)
     }
 }
@@ -152,36 +181,66 @@ pub struct DeliveryTracker {
 
 impl DeliveryTracker {
     pub fn new(policy: RetryPolicy) -> Self {
-        Self { policy, records: HashMap::new() }
+        Self {
+            policy,
+            records: HashMap::new(),
+        }
     }
 
     pub fn track(&mut self, message_id: [u8; 16], now_unix: u64) -> bool {
-        if self.records.contains_key(&message_id) { return false; }
-        self.records.insert(message_id, DeliveryRecord {
-            message_id, attempts: 0, next_retry_at_unix: now_unix,
-        });
+        if self.records.contains_key(&message_id) {
+            return false;
+        }
+        self.records.insert(
+            message_id,
+            DeliveryRecord {
+                message_id,
+                attempts: 0,
+                next_retry_at_unix: now_unix,
+            },
+        );
         true
     }
 
     pub fn due(&self, now_unix: u64) -> Vec<DeliveryRecord> {
-        self.records.values().copied()
+        self.records
+            .values()
+            .copied()
             .filter(|r| r.attempts < self.policy.max_attempts && r.next_retry_at_unix <= now_unix)
             .collect()
     }
 
     /// Record an actual send attempt; the next due time is exponential and bounded.
     pub fn mark_sent(&mut self, message_id: [u8; 16], now_unix: u64) -> bool {
-        let Some(record) = self.records.get_mut(&message_id) else { return false; };
-        if record.attempts >= self.policy.max_attempts { return false; }
+        let Some(record) = self.records.get_mut(&message_id) else {
+            return false;
+        };
+        if record.attempts >= self.policy.max_attempts {
+            return false;
+        }
         record.attempts = record.attempts.saturating_add(1);
-        record.next_retry_at_unix = now_unix.saturating_add(self.policy.delay_seconds(record.attempts));
+        record.next_retry_at_unix =
+            now_unix.saturating_add(self.policy.delay_seconds(record.attempts));
         true
     }
 
-    pub fn acknowledge(&mut self, ack: &StoreAck, hop_key: &[u8],
-                       expected_from: [u8; 16], expected_to: [u8; 16],
-                       now_unix: u64, max_age_seconds: u64) -> Result<bool, AckError> {
-        ack.verify(hop_key, expected_from, expected_to, now_unix, max_age_seconds, 30)?;
+    pub fn acknowledge(
+        &mut self,
+        ack: &StoreAck,
+        hop_key: &[u8],
+        expected_from: [u8; 16],
+        expected_to: [u8; 16],
+        now_unix: u64,
+        max_age_seconds: u64,
+    ) -> Result<bool, AckError> {
+        ack.verify(
+            hop_key,
+            expected_from,
+            expected_to,
+            now_unix,
+            max_age_seconds,
+            30,
+        )?;
         Ok(self.records.remove(&ack.message_id).is_some())
     }
 
@@ -195,11 +254,20 @@ impl DeliveryTracker {
         now_unix: u64,
         max_age_seconds: u64,
     ) -> Result<bool, AckError> {
-        replay.verify_and_accept(ack, hop_key, expected_from, expected_to, now_unix, max_age_seconds)?;
+        replay.verify_and_accept(
+            ack,
+            hop_key,
+            expected_from,
+            expected_to,
+            now_unix,
+            max_age_seconds,
+        )?;
         Ok(self.records.remove(&ack.message_id).is_some())
     }
 
-    pub fn snapshot(&self) -> Vec<DeliveryRecord> { self.records.values().copied().collect() }
+    pub fn snapshot(&self) -> Vec<DeliveryRecord> {
+        self.records.values().copied().collect()
+    }
 
     pub fn restore(&mut self, records: &[DeliveryRecord]) {
         for record in records.iter().take(4096) {
@@ -218,7 +286,11 @@ pub struct AckReplayWindow {
 
 impl AckReplayWindow {
     pub fn new(capacity: usize) -> Self {
-        Self { capacity: capacity.max(1), seen: HashSet::new(), order: VecDeque::new() }
+        Self {
+            capacity: capacity.max(1),
+            seen: HashSet::new(),
+            order: VecDeque::new(),
+        }
     }
     pub fn verify_and_accept(
         &mut self,
@@ -229,12 +301,23 @@ impl AckReplayWindow {
         now_unix: u64,
         max_age_seconds: u64,
     ) -> Result<(), AckError> {
-        ack.verify(hop_key, expected_from, expected_to, now_unix, max_age_seconds, 30)?;
+        ack.verify(
+            hop_key,
+            expected_from,
+            expected_to,
+            now_unix,
+            max_age_seconds,
+            30,
+        )?;
         let key = (ack.from_node, ack.nonce);
-        if !self.seen.insert(key) { return Err(AckError::Replay); }
+        if !self.seen.insert(key) {
+            return Err(AckError::Replay);
+        }
         self.order.push_back(key);
         while self.order.len() > self.capacity {
-            if let Some(old) = self.order.pop_front() { self.seen.remove(&old); }
+            if let Some(old) = self.order.pop_front() {
+                self.seen.remove(&old);
+            }
         }
         Ok(())
     }
@@ -253,54 +336,78 @@ mod tests {
 
     #[test]
     fn store_ack_round_trip_authenticates_identity_and_payload() {
-        let ack = StoreAck::create([9;16], B, A, 100, [7;16], &KEY_AB).unwrap();
+        let ack = StoreAck::create([9; 16], B, A, 100, [7; 16], &KEY_AB).unwrap();
         let decoded = StoreAck::decode(&ack.encode()).unwrap();
         assert_eq!(decoded, ack);
         assert_eq!(decoded.verify(&KEY_AB, B, A, 101, 30, 5), Ok(()));
-        assert_eq!(decoded.verify(&[0xCC;32], B, A, 101, 30, 5), Err(AckError::InvalidMac));
-        assert_eq!(decoded.verify(&KEY_AB, C, A, 101, 30, 5), Err(AckError::WrongPeer));
-        assert_eq!(decoded.verify(&KEY_AB, B, A, 1000, 30, 5), Err(AckError::TimestampOutOfRange));
+        assert_eq!(
+            decoded.verify(&[0xCC; 32], B, A, 101, 30, 5),
+            Err(AckError::InvalidMac)
+        );
+        assert_eq!(
+            decoded.verify(&KEY_AB, C, A, 101, 30, 5),
+            Err(AckError::WrongPeer)
+        );
+        assert_eq!(
+            decoded.verify(&KEY_AB, B, A, 1000, 30, 5),
+            Err(AckError::TimestampOutOfRange)
+        );
     }
 
     #[test]
     fn delivery_retry_uses_bounded_exponential_backoff_and_ack_clears_it() {
         let mut tracker = DeliveryTracker::new(RetryPolicy::default());
-        assert!(tracker.track([8;16], 10));
+        assert!(tracker.track([8; 16], 10));
         assert_eq!(tracker.due(10).len(), 1);
-        assert!(tracker.mark_sent([8;16], 10));
+        assert!(tracker.mark_sent([8; 16], 10));
         assert!(tracker.due(11).is_empty());
         assert_eq!(tracker.due(12).len(), 1);
-        tracker.mark_sent([8;16], 12);
+        tracker.mark_sent([8; 16], 12);
         assert!(tracker.due(15).is_empty());
         assert_eq!(tracker.due(16).len(), 1);
-        let ack = StoreAck::create([8;16], B, A, 16, [1;16], &KEY_AB).unwrap();
+        let ack = StoreAck::create([8; 16], B, A, 16, [1; 16], &KEY_AB).unwrap();
         let mut replay = AckReplayWindow::new(16);
-        assert_eq!(tracker.acknowledge_authenticated(&ack, &mut replay, &KEY_AB, B, A, 16, 30), Ok(true));
+        assert_eq!(
+            tracker.acknowledge_authenticated(&ack, &mut replay, &KEY_AB, B, A, 16, 30),
+            Ok(true)
+        );
         assert!(tracker.snapshot().is_empty());
     }
 
     #[test]
     fn ack_replay_window_rejects_duplicate_nonce() {
-        let ack = StoreAck::create([1;16], B, A, 1, [4;16], &KEY_AB).unwrap();
+        let ack = StoreAck::create([1; 16], B, A, 1, [4; 16], &KEY_AB).unwrap();
         let mut window = AckReplayWindow::new(8);
         assert_eq!(window.verify_and_accept(&ack, &KEY_AB, B, A, 1, 30), Ok(()));
-        assert_eq!(window.verify_and_accept(&ack, &KEY_AB, B, A, 1, 30), Err(AckError::Replay));
+        assert_eq!(
+            window.verify_and_accept(&ack, &KEY_AB, B, A, 1, 30),
+            Err(AckError::Replay)
+        );
     }
 
     #[test]
     fn real_three_node_store_forward_requires_each_hop_store_ack() {
         let original = Envelope {
-            message_id: [42;16], destination_token: C, hops_remaining: 3,
-            expires_at_unix: 500, ciphertext: b"opaque E2EE ciphertext".to_vec(),
+            message_id: [42; 16],
+            destination_token: C,
+            hops_remaining: 3,
+            expires_at_unix: 500,
+            ciphertext: b"opaque E2EE ciphertext".to_vec(),
         };
         let mut b_store = RelayQueue::new(8, 32);
         b_store.set_relay_enabled(true);
-        assert_eq!(b_store.enqueue(original.clone(), 10), RelayDecision::Forward);
+        assert_eq!(
+            b_store.enqueue(original.clone(), 10),
+            RelayDecision::Forward
+        );
 
-        let ack_ab = StoreAck::create(original.message_id, B, A, 10, [11;16], &KEY_AB).unwrap();
+        let ack_ab = StoreAck::create(original.message_id, B, A, 10, [11; 16], &KEY_AB).unwrap();
         let mut a_delivery = DeliveryTracker::new(RetryPolicy::default());
         a_delivery.track(original.message_id, 10);
-        assert_eq!(a_delivery.acknowledge(&ack_ab, &KEY_AB, B, A, 10, 60), Ok(true));
+        assert_eq!(
+            a_delivery.acknowledge(&ack_ab, &KEY_AB, B, A, 10, 60),
+            Ok(true)
+        );
         assert_eq!(b_store.len(), 1);
 
         let to_c = b_store.next_for_forwarding(11).unwrap();
@@ -308,11 +415,14 @@ mod tests {
         let mut c_store = RelayQueue::new(8, 32);
         c_store.set_relay_enabled(true);
         assert_eq!(c_store.enqueue(to_c, 11), RelayDecision::Forward);
-        let ack_bc = StoreAck::create(original.message_id, C, B, 11, [12;16], &KEY_BC).unwrap();
+        let ack_bc = StoreAck::create(original.message_id, C, B, 11, [12; 16], &KEY_BC).unwrap();
         assert_eq!(ack_bc.verify(&KEY_BC, C, B, 11, 60, 30), Ok(()));
         assert_eq!(c_store.len(), 1);
         assert!(b_store.acknowledge_hop(original.message_id));
         assert_eq!(b_store.len(), 0);
-        assert_eq!(c_store.pop_next(12).unwrap().message_id, original.message_id);
+        assert_eq!(
+            c_store.pop_next(12).unwrap().message_id,
+            original.message_id
+        );
     }
 }

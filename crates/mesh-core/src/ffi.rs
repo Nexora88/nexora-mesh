@@ -134,7 +134,6 @@ pub extern "C" fn nm_relay_may_forward(
     .unwrap_or(0)
 }
 
-
 /// Create a versioned HMAC-SHA256 STORE_ACK using a caller-provided pairwise hop key.
 /// Returns encoded byte count, a negative error, or required capacity when too small.
 ///
@@ -143,28 +142,53 @@ pub extern "C" fn nm_relay_may_forward(
 /// readable bytes. output must reference output_capacity writable bytes.
 #[no_mangle]
 pub unsafe extern "C" fn nm_store_ack_create(
-    message_id: *const u8, from_node: *const u8, to_node: *const u8,
-    stored_at_unix: u64, nonce: *const u8, hop_key: *const u8, key_len: usize,
-    output: *mut u8, output_capacity: usize,
+    message_id: *const u8,
+    from_node: *const u8,
+    to_node: *const u8,
+    stored_at_unix: u64,
+    nonce: *const u8,
+    hop_key: *const u8,
+    key_len: usize,
+    output: *mut u8,
+    output_capacity: usize,
 ) -> isize {
-    if message_id.is_null() || from_node.is_null() || to_node.is_null()
-        || nonce.is_null() || hop_key.is_null() { return -20; }
-    if key_len < 32 { return -21; }
+    if message_id.is_null()
+        || from_node.is_null()
+        || to_node.is_null()
+        || nonce.is_null()
+        || hop_key.is_null()
+    {
+        return -20;
+    }
+    if key_len < 32 {
+        return -21;
+    }
     catch_unwind(AssertUnwindSafe(|| {
-        let mut id = [0u8; 16]; id.copy_from_slice(slice::from_raw_parts(message_id, 16));
-        let mut from = [0u8; 16]; from.copy_from_slice(slice::from_raw_parts(from_node, 16));
-        let mut to = [0u8; 16]; to.copy_from_slice(slice::from_raw_parts(to_node, 16));
-        let mut nonce_bytes = [0u8; 16]; nonce_bytes.copy_from_slice(slice::from_raw_parts(nonce, 16));
+        let mut id = [0u8; 16];
+        id.copy_from_slice(slice::from_raw_parts(message_id, 16));
+        let mut from = [0u8; 16];
+        from.copy_from_slice(slice::from_raw_parts(from_node, 16));
+        let mut to = [0u8; 16];
+        to.copy_from_slice(slice::from_raw_parts(to_node, 16));
+        let mut nonce_bytes = [0u8; 16];
+        nonce_bytes.copy_from_slice(slice::from_raw_parts(nonce, 16));
         let key = slice::from_raw_parts(hop_key, key_len);
-        let ack = match crate::delivery::StoreAck::create(id, from, to, stored_at_unix, nonce_bytes, key) {
-            Ok(value) => value.encode(),
-            Err(_) => return -21,
-        };
-        if output_capacity < ack.len() { return ack.len() as isize; }
-        if output.is_null() { return -22; }
+        let ack =
+            match crate::delivery::StoreAck::create(id, from, to, stored_at_unix, nonce_bytes, key)
+            {
+                Ok(value) => value.encode(),
+                Err(_) => return -21,
+            };
+        if output_capacity < ack.len() {
+            return ack.len() as isize;
+        }
+        if output.is_null() {
+            return -22;
+        }
         slice::from_raw_parts_mut(output, ack.len()).copy_from_slice(&ack);
         ack.len() as isize
-    })).unwrap_or(-127)
+    }))
+    .unwrap_or(-127)
 }
 
 /// Verify a STORE_ACK HMAC, expected peer identities, and timestamp bounds.
@@ -175,14 +199,24 @@ pub unsafe extern "C" fn nm_store_ack_create(
 /// hop_key must reference key_len readable bytes.
 #[no_mangle]
 pub unsafe extern "C" fn nm_store_ack_verify(
-    input: *const u8, input_len: usize, hop_key: *const u8, key_len: usize,
-    expected_from: *const u8, expected_to: *const u8, now_unix: u64, max_age_seconds: u64,
+    input: *const u8,
+    input_len: usize,
+    hop_key: *const u8,
+    key_len: usize,
+    expected_from: *const u8,
+    expected_to: *const u8,
+    now_unix: u64,
+    max_age_seconds: u64,
 ) -> i32 {
     if input.is_null() || hop_key.is_null() || expected_from.is_null() || expected_to.is_null() {
         return -23;
     }
-    if key_len < 32 { return -21; }
-    if input_len != crate::delivery::STORE_ACK_LEN { return -23; }
+    if key_len < 32 {
+        return -21;
+    }
+    if input_len != crate::delivery::STORE_ACK_LEN {
+        return -23;
+    }
     catch_unwind(AssertUnwindSafe(|| {
         let bytes = slice::from_raw_parts(input, input_len);
         let ack = match crate::delivery::StoreAck::decode(bytes) {
@@ -190,9 +224,18 @@ pub unsafe extern "C" fn nm_store_ack_verify(
             Err(crate::delivery::AckError::UnsupportedVersion) => return -24,
             Err(_) => return -23,
         };
-        let mut from = [0u8; 16]; from.copy_from_slice(slice::from_raw_parts(expected_from, 16));
-        let mut to = [0u8; 16]; to.copy_from_slice(slice::from_raw_parts(expected_to, 16));
-        match ack.verify(slice::from_raw_parts(hop_key, key_len), from, to, now_unix, max_age_seconds, 30) {
+        let mut from = [0u8; 16];
+        from.copy_from_slice(slice::from_raw_parts(expected_from, 16));
+        let mut to = [0u8; 16];
+        to.copy_from_slice(slice::from_raw_parts(expected_to, 16));
+        match ack.verify(
+            slice::from_raw_parts(hop_key, key_len),
+            from,
+            to,
+            now_unix,
+            max_age_seconds,
+            30,
+        ) {
             Ok(()) => 0,
             Err(crate::delivery::AckError::WeakHopKey) => -21,
             Err(crate::delivery::AckError::WrongPeer) => -25,
@@ -200,7 +243,8 @@ pub unsafe extern "C" fn nm_store_ack_verify(
             Err(crate::delivery::AckError::InvalidMac) => -27,
             Err(_) => -23,
         }
-    })).unwrap_or(-127)
+    }))
+    .unwrap_or(-127)
 }
 
 #[cfg(test)]
@@ -281,22 +325,47 @@ mod tests {
         let mut ack = [0u8; crate::delivery::STORE_ACK_LEN];
         let written = unsafe {
             nm_store_ack_create(
-                id.as_ptr(), from.as_ptr(), to.as_ptr(), 100, nonce.as_ptr(),
-                key.as_ptr(), key.len(), ack.as_mut_ptr(), ack.len()
+                id.as_ptr(),
+                from.as_ptr(),
+                to.as_ptr(),
+                100,
+                nonce.as_ptr(),
+                key.as_ptr(),
+                key.len(),
+                ack.as_mut_ptr(),
+                ack.len(),
             )
         };
         assert_eq!(written, crate::delivery::STORE_ACK_LEN as isize);
-        assert_eq!(unsafe {
-            nm_store_ack_verify(
-                ack.as_ptr(), ack.len(), key.as_ptr(), key.len(),
-                from.as_ptr(), to.as_ptr(), 101, 30
-            )
-        }, 0);
-        assert_eq!(unsafe {
-            nm_store_ack_verify(
-                ack.as_ptr(), ack.len(), key.as_ptr(), key.len(),
-                to.as_ptr(), from.as_ptr(), 101, 30
-            )
-        }, -25);
+        assert_eq!(
+            unsafe {
+                nm_store_ack_verify(
+                    ack.as_ptr(),
+                    ack.len(),
+                    key.as_ptr(),
+                    key.len(),
+                    from.as_ptr(),
+                    to.as_ptr(),
+                    101,
+                    30,
+                )
+            },
+            0
+        );
+        assert_eq!(
+            unsafe {
+                nm_store_ack_verify(
+                    ack.as_ptr(),
+                    ack.len(),
+                    key.as_ptr(),
+                    key.len(),
+                    to.as_ptr(),
+                    from.as_ptr(),
+                    101,
+                    30,
+                )
+            },
+            -25
+        );
     }
 }
