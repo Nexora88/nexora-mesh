@@ -1,7 +1,8 @@
 name: Desktop Native Build
 
 concurrency:
-  group: nexora-mesh-desktop
+  # Keep push and pull_request runs separate for PR branches.
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
   cancel-in-progress: true
 
 on:
