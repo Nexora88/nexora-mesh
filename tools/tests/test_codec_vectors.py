@@ -15,19 +15,19 @@ class FrameCodecTests(unittest.TestCase):
 
     def test_short_header(self):
         with self.assertRaises(FrameError):
-            decode_frame(b"\\x00")
+            decode_frame(b"\x00")
 
     def test_truncated_payload(self):
         with self.assertRaises(FrameError):
-            decode_frame(b"\\x00\\x00\\x00\\x03x")
+            decode_frame(b"\x00\x00\x00\x03x")
 
     def test_oversized_length(self):
         with self.assertRaises(FrameError):
-            decode_frame(b"\\x00\\x10\\x00\\x01")
+            decode_frame(b"\x00\x10\x00\x01")
 
     def test_trailing_bytes(self):
         with self.assertRaises(FrameError):
-            decode_frame(b"\\x00\\x00\\x00\\x01ab")
+            decode_frame(b"\x00\x00\x00\x01ab")
 
     def test_encode_limit(self):
         with self.assertRaises(FrameError):
