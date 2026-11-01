@@ -376,7 +376,13 @@ mod tests {
             tracker.acknowledge_authenticated(
                 &ack,
                 &mut replay,
-                AckVerification { hop_key: &KEY_AB, expected_from: B, expected_to: A, now_unix: 16, max_age_seconds: 30 },
+                AckVerification {
+                    hop_key: &KEY_AB,
+                    expected_from: B,
+                    expected_to: A,
+                    now_unix: 16,
+                    max_age_seconds: 30,
+                },
             ),
             Ok(true)
         );
