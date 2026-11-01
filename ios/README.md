@@ -1,13 +1,21 @@
-# Apple platform prototype
+# iOS / Apple platform notes
 
-`NexoraMeshApp.swift` is a native SwiftUI interface starter for iOS. It is not yet a complete Xcode project and does not implement Bluetooth discovery, peer pairing, message transport, or encryption.
+## Current state
 
-## Next steps
+- `NexoraMeshApp.swift` — SwiftUI UI prototype.
+- `MeshRadioManager.swift` — CoreBluetooth skeleton that respects OS limits.
+- `Info.plist.notes.md` — required usage strings and background-mode guidance.
 
-1. Add an Xcode project and configure supported iOS deployment targets.
-2. Design a shared cross-platform protocol and stable device identity format.
-3. Implement an iOS-compatible local transport. Apple's platform restrictions mean Android Wi-Fi Direct APIs cannot be reused directly on iOS.
-4. Implement explicit user-approved pairing, key verification, encrypted messaging, and disconnect/reconnect handling.
-5. Test with real iPhones and Android devices with internet disabled.
+## What is intentionally not claimed
 
-The UI intentionally labels itself a prototype. Do not use it for emergency operations until radio transport, security, and field reliability have been independently tested.
+- No physical device discovery or message delivery yet.
+- No permanent background relay (iOS does not allow it reliably).
+- No Xcode project or App Store build yet.
+
+## Next steps for a real Xcode project
+
+1. Create an iOS app target and add the Swift files.
+2. Add the usage description and (if needed) the two Bluetooth background modes.
+3. Wire `MeshRadioManager` into the Devices tab with an explicit time-limited discovery button.
+4. Later: call the Rust core for the relay queue and power policy.
+5. Test on a physical iPhone; the Simulator has no real BLE radio.

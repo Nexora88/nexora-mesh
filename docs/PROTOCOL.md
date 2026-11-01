@@ -2,26 +2,57 @@
 
 This is an evolving design note, not a finalized wire-protocol specification.
 
-## Initial frame
+## Outer frame
 
-The Rust core starts with a bounded frame: a 4-byte unsigned big-endian payload length followed by the payload. The current maximum is 1 MiB. Framing is not encryption, authentication, routing, or a complete message protocol.
+Bounded frame: 4-byte big-endian payload length + payload. Maximum 1 MiB.
+Framing is not encryption or authentication.
 
-## Planned logical envelope
+## Logical mesh packet (version 1)
 
-A future version may define protocol version, message type, random message identifier, sender and recipient identity references, creation time and expiry, hop limit/routing metadata, and ciphertext payload. Field sizes, canonical encoding, compatibility, signatures, replay protection, and error behavior must be specified and tested before wire compatibility is promised.
+After the outer frame, the payload is:
 
-## Transport independence
+| Field | Size | Notes |
+|-------|------|--------|
+| version | 1 | currently `1` |
+| ttl_hops | 1 | decremented once per forward; default max 5 |
+| flags | 1 | reserved |
+| reserved | 1 | 0 |
+| message_id | 16 | random per message; used for dedup |
+| blind_target | 16 | keyed tag — only intended recipient recognises it |
+| expires_at | 8 | Unix seconds, big-endian |
+| payload | rest | opaque ciphertext (E2E not implemented in core) |
 
-Logical messages should not depend on Bluetooth or Wi-Fi Direct APIs. Transport adapters provide byte streams or bounded packets; the core validates and processes frames.
+Relays must not inspect or modify the payload. They only validate TTL/expiry/dedup and match `blind_target` against local roots.
+
+## Ephemeral IDs (over-the-air identity)
+
+- Long-term identity secret stays on device after pairing (QR/PIN).
+- Advertised identity rotates every 15 minutes (`EphemeralIdRotator`).
+- Derived as a keyed function of (secret, time slot). The current implementation uses a **development placeholder KDF** — replace with HKDF before production.
+
+## Blind multi-hop
+
+1. Sender computes `blind_target = KDF(recipient_root, message_id)`.
+2. Intermediate nodes try local roots; on match → local delivery.
+3. Otherwise, if power policy allows and TTL > 0 → `RelayQueue`.
+4. On forward, TTL is decremented exactly once.
+
+## C ABI for radio hosts
+
+| Function | Role |
+|----------|------|
+| `nm_node_create` / `nm_node_free` | opaque node lifetime |
+| `nm_process_incoming` | feed raw BLE bytes; returns deliver / queue / drop |
+| `nm_current_ephemeral_id` | 16-byte ID for advertising |
+| `nm_ephemeral_tick` | rotate when slot changes |
+| `nm_recommended_scan_interval_secs` / `nm_may_forward` | power policy |
 
 ## Milestones
 
-1. Frame parser and tests.
-2. Android local data model and chat UI.
-3. One-hop local connection and authenticated session.
-4. End-to-end encrypted text messages.
-5. Offline queue and delivery receipts.
-6. Store-and-forward relay with loop prevention and expiry.
-7. Attachments and further media only after text reliability and battery tests.
+1. Frame parser and tests — done
+2. Relay queue + blind target + ephemeral rotator — structure done (dev KDF)
+3. Android/iOS radio path calling `nm_process_incoming` — host wiring next
+4. Reviewed crypto (HKDF/HMAC) + real E2E
+5. Physical two/three-device field tests
 
-No claim of global reach, automatic connectivity at any distance, anonymity, or guaranteed delivery is made.
+No claim of anonymity, global reach, or guaranteed delivery is made.
