@@ -8,3 +8,7 @@ description = "Transport-independent protocol primitives, relay queue, ephemeral
 [lib]
 path = "src/lib.rs"
 crate-type = ["rlib", "cdylib", "staticlib"]
+
+[dependencies]
+hmac = "0.12"
+sha2 = "0.10"

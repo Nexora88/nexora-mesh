@@ -1,4 +1,5 @@
 //! Transport-independent framing primitives. Framing is not encryption or authentication.
+pub mod delivery;
 pub mod ffi;
 pub mod relay;
 pub mod wire;

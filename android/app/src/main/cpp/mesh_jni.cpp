@@ -81,3 +81,52 @@ Java_org_nexora_mesh_NativeMesh_mayRelay(
         charging ? 1 : 0, low_power ? 1 : 0, foreground ? 1 : 0);
     return value == 1 ? JNI_TRUE : JNI_FALSE;
 }
+
+extern "C" JNIEXPORT jint JNICALL
+Java_org_nexora_mesh_NativeMesh_verifyStoreAck(JNIEnv* env, jclass, jbyteArray ack,
+    jbyteArray key, jbyteArray expected_from, jbyteArray expected_to,
+    jlong now_unix, jlong max_age) {
+    if (ack == nullptr || key == nullptr || expected_from == nullptr || expected_to == nullptr) return -23;
+    const jsize ack_len = env->GetArrayLength(ack);
+    const jsize key_len = env->GetArrayLength(key);
+    if (ack_len != 105 || key_len < 32 || env->GetArrayLength(expected_from) != 16 ||
+        env->GetArrayLength(expected_to) != 16 || now_unix < 0 || max_age < 0) return -23;
+    std::vector<std::uint8_t> ack_bytes(static_cast<std::size_t>(ack_len));
+    std::vector<std::uint8_t> key_bytes(static_cast<std::size_t>(key_len));
+    std::vector<std::uint8_t> from_bytes(16), to_bytes(16);
+    env->GetByteArrayRegion(ack, 0, ack_len, reinterpret_cast<jbyte*>(ack_bytes.data()));
+    env->GetByteArrayRegion(key, 0, key_len, reinterpret_cast<jbyte*>(key_bytes.data()));
+    env->GetByteArrayRegion(expected_from, 0, 16, reinterpret_cast<jbyte*>(from_bytes.data()));
+    env->GetByteArrayRegion(expected_to, 0, 16, reinterpret_cast<jbyte*>(to_bytes.data()));
+    if (env->ExceptionCheck()) return -23;
+    return nm_store_ack_verify(ack_bytes.data(), ack_bytes.size(), key_bytes.data(), key_bytes.size(),
+        from_bytes.data(), to_bytes.data(), static_cast<std::uint64_t>(now_unix),
+        static_cast<std::uint64_t>(max_age));
+}
+
+extern "C" JNIEXPORT jbyteArray JNICALL
+Java_org_nexora_mesh_NativeMesh_createStoreAck(JNIEnv* env, jclass, jbyteArray message_id,
+    jbyteArray from_node, jbyteArray to_node, jlong stored_at, jbyteArray nonce, jbyteArray key) {
+    if (message_id == nullptr || from_node == nullptr || to_node == nullptr ||
+        nonce == nullptr || key == nullptr || stored_at < 0) return nullptr;
+    if (env->GetArrayLength(message_id) != 16 || env->GetArrayLength(from_node) != 16 ||
+        env->GetArrayLength(to_node) != 16 || env->GetArrayLength(nonce) != 16 ||
+        env->GetArrayLength(key) < 32) return nullptr;
+    std::vector<std::uint8_t> id(16), from(16), to(16), nonce_bytes(16);
+    const jsize key_len = env->GetArrayLength(key);
+    std::vector<std::uint8_t> key_bytes(static_cast<std::size_t>(key_len));
+    env->GetByteArrayRegion(message_id, 0, 16, reinterpret_cast<jbyte*>(id.data()));
+    env->GetByteArrayRegion(from_node, 0, 16, reinterpret_cast<jbyte*>(from.data()));
+    env->GetByteArrayRegion(to_node, 0, 16, reinterpret_cast<jbyte*>(to.data()));
+    env->GetByteArrayRegion(nonce, 0, 16, reinterpret_cast<jbyte*>(nonce_bytes.data()));
+    env->GetByteArrayRegion(key, 0, key_len, reinterpret_cast<jbyte*>(key_bytes.data()));
+    if (env->ExceptionCheck()) return nullptr;
+    std::vector<std::uint8_t> output(105);
+    const auto written = nm_store_ack_create(id.data(), from.data(), to.data(),
+        static_cast<std::uint64_t>(stored_at), nonce_bytes.data(), key_bytes.data(),
+        key_bytes.size(), output.data(), output.size());
+    if (written != 105) return nullptr;
+    jbyteArray result = env->NewByteArray(105);
+    if (result != nullptr) env->SetByteArrayRegion(result, 0, 105, reinterpret_cast<const jbyte*>(output.data()));
+    return result;
+}

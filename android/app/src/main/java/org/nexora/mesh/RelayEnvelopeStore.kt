@@ -88,9 +88,25 @@ class RelayEnvelopeStore(context: Context) {
         runCatching { NativeMesh.forward(frame, nowUnixSeconds) }.getOrNull()
     }
 
-    /** Call only after the next device confirms durable acceptance of this message ID. */
-    fun acknowledgeStoredByNextHop(messageIdHex: String): Boolean = synchronized(lock) {
-        val id = messageIdHex.lowercase()
+    /** Create a STORE_ACK only after enqueue() has durably committed this envelope. */
+    fun createStoredAck(envelope: ByteArray, fromNode: ByteArray, toNode: ByteArray,
+                        hopKey: ByteArray, nowUnixSeconds: Long, nonce: ByteArray): ByteArray? = synchronized(lock) {
+        if (!isOptedIn() || envelope.size < 49 || NativeMesh.validate(envelope) != 0) return null
+        if (fromNode.size != 16 || toNode.size != 16 || nonce.size != 16 || hopKey.size < 32) return null
+        val id = envelope.copyOfRange(3, 19).joinToString("") { "%02x".format(it) }
+        if (queue[id]?.contentEquals(envelope) != true) return null
+        runCatching {
+            NativeMesh.createStoreAck(envelope.copyOfRange(3, 19), fromNode, toNode, nowUnixSeconds, nonce, hopKey)
+        }.getOrNull()
+    }
+
+    /** A queue item is removed only after Rust verifies MAC, peer IDs and ACK freshness. */
+    fun acknowledgeStoredByNextHop(ack: ByteArray, hopKey: ByteArray,
+                                   expectedFrom: ByteArray, expectedTo: ByteArray,
+                                   nowUnixSeconds: Long, maxAgeSeconds: Long): Boolean = synchronized(lock) {
+        if (ack.size != 105 || NativeMesh.verifyStoreAck(
+                ack, hopKey, expectedFrom, expectedTo, nowUnixSeconds, maxAgeSeconds) != 0) return false
+        val id = ack.copyOfRange(1, 17).joinToString("") { "%02x".format(it) }
         val removed = queue.remove(id) ?: return false
         if (persistAll()) return true
         queue[id] = removed

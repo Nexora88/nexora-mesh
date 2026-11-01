@@ -67,13 +67,41 @@ final class MeshRelayStore {
 
     /// Remove only after the next device confirms durable storage of this envelope.
     @discardableResult
-    func acknowledgeStoredByNextHop(messageID: String) -> Bool {
+    private func acknowledgeStoredByNextHop(messageID: String) -> Bool {
         lock.lock()
         defer { lock.unlock() }
         guard var queue = try? loadQueue(),
               let index = queue.firstIndex(where: { $0.id == messageID.lowercased() }) else { return false }
         queue.remove(at: index)
         return (try? write(try JSONEncoder().encode(queue), account: queueAccount)) != nil
+    }
+
+    /// Create a STORE_ACK only after enqueue() has committed the opaque envelope.
+    func createStoredAck(envelope: Data, fromNode: Data, toNode: Data,
+                         hopKey: Data, nowUnixSeconds: UInt64, nonce: Data) -> Data? {
+        lock.lock()
+        defer { lock.unlock() }
+        guard isOptedIn, envelope.count >= 49 else { return nil }
+        do { try MeshCoreBridge.validate(envelope) } catch { return nil }
+        let messageID = envelope.subdata(in: 3..<19)
+        let id = messageID.map { String(format: "%02x", $0) }.joined()
+        guard (try? loadQueue().contains(where: { $0.id == id && $0.envelope == envelope })) == true else {
+            return nil
+        }
+        return MeshCoreBridge.createStoreAck(messageID: messageID, fromNode: fromNode,
+            toNode: toNode, storedAtUnixSeconds: nowUnixSeconds, nonce: nonce, hopKey: hopKey)
+    }
+
+    /// Remove a stored item only after Rust verifies the pairwise MAC and peer identities.
+    @discardableResult
+    func acknowledgeStoredByNextHop(ack: Data, hopKey: Data, expectedFrom: Data,
+                                    expectedTo: Data, nowUnixSeconds: UInt64,
+                                    maxAgeSeconds: UInt64) -> Bool {
+        guard MeshCoreBridge.verifyStoreAck(ack, hopKey: hopKey, expectedFrom: expectedFrom,
+            expectedTo: expectedTo, nowUnixSeconds: nowUnixSeconds,
+            maxAgeSeconds: maxAgeSeconds), ack.count == 105 else { return false }
+        let id = ack.subdata(in: 1..<17).map { String(format: "%02x", $0) }.joined()
+        return acknowledgeStoredByNextHop(messageID: id)
     }
 
     private func loadQueue() throws -> [Record] {

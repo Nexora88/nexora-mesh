@@ -36,6 +36,70 @@ enum MeshCoreBridge {
         ) == 1
     }
 
+
+
+    /// Creates a pairwise-key authenticated next-hop STORE_ACK using Rust.
+    static func createStoreAck(messageID: Data, fromNode: Data, toNode: Data,
+                               storedAtUnixSeconds: UInt64, nonce: Data,
+                               hopKey: Data) -> Data? {
+        guard messageID.count == 16, fromNode.count == 16, toNode.count == 16,
+              nonce.count == 16, hopKey.count >= 32 else { return nil }
+        var output = Data(count: 105)
+        let written = messageID.withUnsafeBytes { idBytes in
+            fromNode.withUnsafeBytes { fromBytes in
+                toNode.withUnsafeBytes { toBytes in
+                    nonce.withUnsafeBytes { nonceBytes in
+                        hopKey.withUnsafeBytes { keyBytes in
+                            output.withUnsafeMutableBytes { outputBytes in
+                                nm_store_ack_create(
+                                    idBytes.bindMemory(to: UInt8.self).baseAddress,
+                                    fromBytes.bindMemory(to: UInt8.self).baseAddress,
+                                    toBytes.bindMemory(to: UInt8.self).baseAddress,
+                                    storedAtUnixSeconds,
+                                    nonceBytes.bindMemory(to: UInt8.self).baseAddress,
+                                    keyBytes.bindMemory(to: UInt8.self).baseAddress,
+                                    keyBytes.count,
+                                    outputBytes.bindMemory(to: UInt8.self).baseAddress,
+                                    outputBytes.count
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        guard written == 105 else { return nil }
+        return output
+    }
+
+    /// Verifies the Rust HMAC-SHA256 next-hop STORE_ACK against the expected peer IDs.
+    /// The supplied hop key must be a pairwise secret of at least 32 bytes.
+    static func verifyStoreAck(_ ack: Data, hopKey: Data, expectedFrom: Data,
+                               expectedTo: Data, nowUnixSeconds: UInt64,
+                               maxAgeSeconds: UInt64) -> Bool {
+        guard ack.count == 105, hopKey.count >= 32,
+              expectedFrom.count == 16, expectedTo.count == 16 else { return false }
+        let result = ack.withUnsafeBytes { ackBytes in
+            hopKey.withUnsafeBytes { keyBytes in
+                expectedFrom.withUnsafeBytes { fromBytes in
+                    expectedTo.withUnsafeBytes { toBytes in
+                        nm_store_ack_verify(
+                            ackBytes.bindMemory(to: UInt8.self).baseAddress,
+                            ackBytes.count,
+                            keyBytes.bindMemory(to: UInt8.self).baseAddress,
+                            keyBytes.count,
+                            fromBytes.bindMemory(to: UInt8.self).baseAddress,
+                            toBytes.bindMemory(to: UInt8.self).baseAddress,
+                            nowUnixSeconds,
+                            maxAgeSeconds
+                        )
+                    }
+                }
+            }
+        }
+        return result == 0
+    }
+
     static func forward(_ envelope: Data, nowUnixSeconds: UInt64) throws -> Data {
         try validate(envelope)
         var output = Data(count: envelope.count)

@@ -35,6 +35,7 @@ final class MeshSecureChat: ObservableObject {
     private let defaults = UserDefaults.standard
     private let pendingKey = "mesh_delivery_v1_pending_ios"
     private let receivedKey = "mesh_delivery_v1_received_ios"
+    private let retryKey = "mesh_delivery_v1_retry_counts_ios"
     private let contactsKey = "mesh_trusted_contacts_v1_ios"
     private let queuedDraftPrefix = "mesh_queued_draft_v1_"
     private let controlAAD = Data("NexoraMesh/control/v1".utf8)
@@ -46,9 +47,11 @@ final class MeshSecureChat: ObservableObject {
     private var remoteProofReceived = false
     private var localProofAcked = false
     private var retryCounts: [String: Int] = [:]
+    private var retryScheduled = Set<String>()
 
     init() {
         trustedContacts = (try? JSONDecoder().decode([Contact].self, from: defaults.data(forKey: contactsKey) ?? Data())) ?? []
+        retryCounts = defaults.dictionary(forKey: retryKey) as? [String: Int] ?? [:]
         _ = try? localPublicKeyDER()
         selectedRecipientFingerprint = trustedContacts.first?.fingerprint
         restorePendingMessages()
@@ -224,6 +227,8 @@ final class MeshSecureChat: ObservableObject {
                     pending.removeAll { $0.id == id }
                     try savePending(pending)
                     retryCounts.removeValue(forKey: id)
+                    retryScheduled.remove(id)
+                    persistRetryCounts()
                     if let index = messages.firstIndex(where: { $0.id == id }) { messages[index].delivery = "Teslim edildi" }
                 }
             case "DATA":
@@ -386,9 +391,11 @@ final class MeshSecureChat: ObservableObject {
         guard let sendPacket, let remoteFingerprint else { return }
         // Never flush a stored frame to a different trusted recipient.
         for item in loadPending() where item.recipientFingerprint?.caseInsensitiveCompare(remoteFingerprint) == .orderedSame {
+            if (retryCounts[item.id] ?? 0) > 8 { retryCounts[item.id] = 0 }
             sendPacket(item.frame)
-            scheduleRetry(id: item.id, attempt: 1)
+            scheduleRetry(id: item.id, attempt: max(1, retryCounts[item.id] ?? 1))
         }
+        persistRetryCounts()
     }
 
     private func keychainReadDraft(account: String) throws -> Data? {
@@ -426,14 +433,35 @@ final class MeshSecureChat: ObservableObject {
         }
     }
 
+    private func persistRetryCounts() {
+        defaults.set(retryCounts, forKey: retryKey)
+    }
+
     private func scheduleRetry(id: String, attempt: Int) {
-        guard attempt <= 8 else { status = "Teslim onayı yok; şifreli mesaj kuyrukta tutuluyor."; return }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
-            guard let self, self.loadPending().contains(where: { $0.id == id }) else { return }
-            guard let frame = self.loadPending().first(where: { $0.id == id })?.frame,
-                  let sendPacket = self.sendPacket else { return }
-            sendPacket(frame)
-            self.scheduleRetry(id: id, attempt: attempt + 1)
+        guard retryScheduled.insert(id).inserted else { return }
+        let currentAttempt = max(attempt, retryCounts[id] ?? attempt)
+        guard currentAttempt <= 8 else {
+            retryScheduled.remove(id)
+            status = "Teslim onayı yok; şifreli mesaj kalıcı kuyrukta tutuluyor."
+            return
+        }
+        let delay = min(2.0 * pow(2.0, Double(currentAttempt - 1)), 300.0)
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+            guard let self else { return }
+            self.retryScheduled.remove(id)
+            guard let item = self.loadPending().first(where: { $0.id == id }) else {
+                self.retryCounts.removeValue(forKey: id)
+                self.persistRetryCounts()
+                return
+            }
+            guard let sendPacket = self.sendPacket else {
+                self.scheduleRetry(id: id, attempt: currentAttempt)
+                return
+            }
+            sendPacket(item.frame)
+            self.retryCounts[id] = currentAttempt + 1
+            self.persistRetryCounts()
+            self.scheduleRetry(id: id, attempt: currentAttempt + 1)
         }
     }
 
