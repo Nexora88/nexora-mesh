@@ -61,8 +61,12 @@ pub unsafe extern "C" fn nm_wire_encode(
     output: *mut u8,
     output_capacity: usize,
 ) -> isize {
-    if message_id.is_null() || destination_token.is_null() || ciphertext.is_null()
-        || ciphertext_len == 0 || ciphertext_len > crate::relay::MAX_CIPHERTEXT_BYTES {
+    if message_id.is_null()
+        || destination_token.is_null()
+        || ciphertext.is_null()
+        || ciphertext_len == 0
+        || ciphertext_len > crate::relay::MAX_CIPHERTEXT_BYTES
+    {
         return -20;
     }
     catch_unwind(AssertUnwindSafe(|| {
@@ -82,11 +86,16 @@ pub unsafe extern "C" fn nm_wire_encode(
             Ok(value) => value,
             Err(error) => return error_code(error) as isize,
         };
-        if output_capacity < encoded.len() { return encoded.len() as isize; }
-        if output.is_null() { return -21; }
+        if output_capacity < encoded.len() {
+            return encoded.len() as isize;
+        }
+        if output.is_null() {
+            return -21;
+        }
         slice::from_raw_parts_mut(output, encoded.len()).copy_from_slice(&encoded);
         encoded.len() as isize
-    })).unwrap_or(-127)
+    }))
+    .unwrap_or(-127)
 }
 
 fn error_code(error: WireError) -> i32 {
