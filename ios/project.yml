@@ -19,7 +19,7 @@ targets:
     sources:
       - path: .
         includes:
-          - "**/*.swift"
+          - "*.swift"
     info:
       properties:
         UIBackgroundModes:
