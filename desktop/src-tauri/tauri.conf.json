@@ -30,7 +30,7 @@
       "dmg",
       "app",
       "deb",
-      "AppImage"
+      "appimage"
     ]
   }
 }
