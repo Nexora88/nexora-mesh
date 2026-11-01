@@ -99,7 +99,7 @@ jobs:
             build
       - name: Run iOS native crypto and malformed-packet tests
         run: |
-          DEVICE_ID="$(xcrun simctl list devices available | grep -m1 'iPhone' | sed -E 's/.*\\(([A-F0-9-]{36})\\).*/\\1/')"
+          DEVICE_ID="$(xcrun simctl list devices available | awk -F '[()]' '/iPhone/ { print $2; exit }')"
           test -n "$DEVICE_ID"
           xcodebuild \
             -project ios/NexoraMesh.xcodeproj \
