@@ -6,7 +6,7 @@ concurrency:
 
 on:
   push:
-    branches: [main, "work/**"]
+    branches: [main, "work/**", "feat/**"]
   pull_request:
 permissions:
   contents: read
