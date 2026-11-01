@@ -168,6 +168,15 @@ impl RetryPolicy {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct AckVerification<'a> {
+    pub hop_key: &'a [u8],
+    pub expected_from: [u8; 16],
+    pub expected_to: [u8; 16],
+    pub now_unix: u64,
+    pub max_age_seconds: u64,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct DeliveryRecord {
     pub message_id: [u8; 16],
     pub attempts: u8,
@@ -244,25 +253,19 @@ impl DeliveryTracker {
         Ok(self.records.remove(&ack.message_id).is_some())
     }
 
-    // Keep the ACK verification inputs explicit at this security boundary.
-    #[allow(clippy::too_many_arguments)]
     pub fn acknowledge_authenticated(
         &mut self,
         ack: &StoreAck,
         replay: &mut AckReplayWindow,
-        hop_key: &[u8],
-        expected_from: [u8; 16],
-        expected_to: [u8; 16],
-        now_unix: u64,
-        max_age_seconds: u64,
+        verification: AckVerification<'_>,
     ) -> Result<bool, AckError> {
         replay.verify_and_accept(
             ack,
-            hop_key,
-            expected_from,
-            expected_to,
-            now_unix,
-            max_age_seconds,
+            verification.hop_key,
+            verification.expected_from,
+            verification.expected_to,
+            verification.now_unix,
+            verification.max_age_seconds,
         )?;
         Ok(self.records.remove(&ack.message_id).is_some())
     }
@@ -370,7 +373,11 @@ mod tests {
         let ack = StoreAck::create([8; 16], B, A, 16, [1; 16], &KEY_AB).unwrap();
         let mut replay = AckReplayWindow::new(16);
         assert_eq!(
-            tracker.acknowledge_authenticated(&ack, &mut replay, &KEY_AB, B, A, 16, 30),
+            tracker.acknowledge_authenticated(
+                &ack,
+                &mut replay,
+                AckVerification { hop_key: &KEY_AB, expected_from: B, expected_to: A, now_unix: 16, max_age_seconds: 30 },
+            ),
             Ok(true)
         );
         assert!(tracker.snapshot().is_empty());
