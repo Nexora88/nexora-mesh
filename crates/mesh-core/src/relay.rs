@@ -247,7 +247,8 @@ impl RelayQueue {
     /// Remove expired entries without disturbing the order of live envelopes.
     pub fn purge_expired(&mut self, now_unix: u64) -> usize {
         let before = self.queue.len();
-        self.queue.retain(|item| item.expires_at_unix > now_unix && item.hops_remaining > 0);
+        self.queue
+            .retain(|item| item.expires_at_unix > now_unix && item.hops_remaining > 0);
         before - self.queue.len()
     }
 
@@ -260,7 +261,11 @@ impl RelayQueue {
 
     /// Remove an item only after the next hop confirms it durably accepted the envelope.
     pub fn acknowledge_hop(&mut self, message_id: [u8; 16]) -> bool {
-        if let Some(index) = self.queue.iter().position(|item| item.message_id == message_id) {
+        if let Some(index) = self
+            .queue
+            .iter()
+            .position(|item| item.message_id == message_id)
+        {
             self.queue.remove(index);
             true
         } else {
@@ -386,7 +391,11 @@ mod tests {
         let forwarded = queue.next_for_forwarding(2).unwrap();
         assert_eq!(forwarded.hops_remaining, 2);
         assert_eq!(forwarded.ciphertext, original.ciphertext);
-        assert_eq!(queue.len(), 1, "in-flight item must remain durable until hop ACK");
+        assert_eq!(
+            queue.len(),
+            1,
+            "in-flight item must remain durable until hop ACK"
+        );
 
         assert!(!queue.acknowledge_hop([99; 16]));
         assert_eq!(queue.len(), 1);
