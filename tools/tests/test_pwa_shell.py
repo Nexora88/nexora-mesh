@@ -8,28 +8,28 @@ WEB = ROOT / "web"
 
 class PwaShellTests(unittest.TestCase):
     def test_manifest_is_valid_and_standalone(self):
-        manifest = json.loads((WEB / "manifest.webmanifest").read_text())
+        manifest = json.loads((WEB / "manifest.webmanifest").read_text(encoding="utf-8"))
         self.assertEqual(manifest["display"], "standalone")
         self.assertEqual(manifest["start_url"], "./")
         self.assertTrue((WEB / manifest["icons"][0]["src"].removeprefix("./")).is_file())
 
     def test_shell_assets_exist_and_are_referenced(self):
-        html = (WEB / "index.html").read_text()
+        html = (WEB / "index.html").read_text(encoding="utf-8")
         for asset in ("styles.css", "app.js", "manifest.webmanifest", "icon.svg"):
             self.assertIn(asset, html)
             self.assertTrue((WEB / asset).is_file())
 
     def test_ui_does_not_claim_browser_radio_or_fake_send(self):
-        html = (WEB / "index.html").read_text()
-        js = (WEB / "app.js").read_text()
+        html = (WEB / "index.html").read_text(encoding="utf-8")
+        js = (WEB / "app.js").read_text(encoding="utf-8")
         self.assertIn("native radyo köprüsü", html.lower())
         self.assertIn("gerçek radyo köprüsü", js.lower())
         self.assertIn("Gönderilmedi", js)
         self.assertIn("verified:false", js)
 
     def test_desktop_native_ble_controls_are_not_faked_in_browser(self):
-        html = (WEB / "index.html").read_text()
-        js = (WEB / "app.js").read_text()
+        html = (WEB / "index.html").read_text(encoding="utf-8")
+        js = (WEB / "app.js").read_text(encoding="utf-8")
         self.assertIn('id="desktop-scan"', html)
         self.assertIn('id="desktop-stop"', html)
         self.assertIn("window.__TAURI__?.core?.invoke", js)
@@ -37,16 +37,16 @@ class PwaShellTests(unittest.TestCase):
 
     def test_tauri_desktop_shell_declares_local_frontend_and_ble_host(self):
         desktop = ROOT / "desktop" / "src-tauri"
-        config = json.loads((desktop / "tauri.conf.json").read_text())
-        cargo = (desktop / "Cargo.toml").read_text()
-        rust = (desktop / "src" / "lib.rs").read_text()
+        config = json.loads((desktop / "tauri.conf.json").read_text(encoding="utf-8"))
+        cargo = (desktop / "Cargo.toml").read_text(encoding="utf-8")
+        rust = (desktop / "src" / "lib.rs").read_text(encoding="utf-8")
         self.assertEqual(config["build"]["frontendDist"], "../../web")
         self.assertIn('btleplug = "0.11"', cargo)
         self.assertIn("start_ble_discovery", rust)
         self.assertIn("nearby_ble_devices", rust)
 
     def test_service_worker_caches_offline_shell(self):
-        worker = (WEB / "sw.js").read_text()
+        worker = (WEB / "sw.js").read_text(encoding="utf-8")
         self.assertIn("addAll(ASSETS)", worker)
         self.assertIn("e.request.mode==='navigate'", worker)
 
