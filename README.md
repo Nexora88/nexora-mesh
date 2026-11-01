@@ -73,7 +73,7 @@ See docs/PRODUCT_VISION.md, docs/PROTOCOL.md, docs/THREAT_MODEL.md, and SECURITY
 
 ## Privacy and security status
 
-The Android BLE path is experimentally connected to the existing QR-trust and encrypted chat protocol. It is not independently audited and does not provide forward secrecy; iOS remains transport-only and Android↔iOS encrypted chat is not complete. See [the privacy/security threat model](docs/PRIVACY_SECURITY.md) and [cross-platform transport status](docs/CROSS_PLATFORM_TRANSPORT.md). Do not use this prototype for emergency guarantees or highly sensitive communication.
+The Android BLE GATT transport remains a separate prototype and is not yet wired end-to-end to the QR-trust and encrypted chat protocol. The current direct chat path uses Bluetooth Classic RFCOMM. The relay queue/store primitives are not yet an authenticated multi-hop delivery system. iOS remains transport-only; Android↔iOS encrypted chat, forward secrecy, physical interoperability tests and independent security review are incomplete. See [the privacy/security threat model](docs/PRIVACY_SECURITY.md) and [cross-platform transport status](docs/CROSS_PLATFORM_TRANSPORT.md). Do not use this prototype for emergency guarantees or highly sensitive communication.
 
 
 ## Installable web / desktop management console
