@@ -1,7 +1,7 @@
 name: CI
 
 concurrency:
-  group: nexora-mesh-ci-${{ github.event.pull_request.number || github.ref }}
+  group: nexora-mesh-ci
   cancel-in-progress: true
 
 on:

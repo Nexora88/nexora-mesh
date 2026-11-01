@@ -1,7 +1,7 @@
 name: Desktop Native Build
 
 concurrency:
-  group: nexora-mesh-desktop-${{ github.event.pull_request.number || github.ref }}
+  group: nexora-mesh-desktop
   cancel-in-progress: true
 
 on:
