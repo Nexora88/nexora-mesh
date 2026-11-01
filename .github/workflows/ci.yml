@@ -60,9 +60,8 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - run: python tools/tests/test_codec_vectors.py
-      - run: python tools/tests/test_crypto_vectors.py
-      - run: python tools/tests/test_pwa_shell.py
+      - name: Run all Python and release-configuration tests
+        run: python -m unittest discover -s tools/tests -p 'test_*.py' -v
 
   ios-native:
     runs-on: macos-latest
@@ -86,6 +85,7 @@ jobs:
             -sdk iphonesimulator \
             -configuration Debug \
             -destination 'generic/platform=iOS Simulator' \
+            -derivedDataPath "$RUNNER_TEMP/nexora-derived" \
             CODE_SIGNING_ALLOWED=NO \
             build
       - name: Run iOS native crypto and malformed-packet tests
@@ -96,8 +96,16 @@ jobs:
             -project ios/NexoraMesh.xcodeproj \
             -scheme NexoraMesh \
             -destination "platform=iOS Simulator,id=$DEVICE_ID" \
+            -derivedDataPath "$RUNNER_TEMP/nexora-derived" \
             CODE_SIGNING_ALLOWED=NO \
             test
+      - name: Upload iOS Simulator app
+        uses: actions/upload-artifact@v4
+        with:
+          name: nexora-mesh-ios-simulator-app
+          path: ${{ runner.temp }}/nexora-derived/Build/Products/Debug-iphonesimulator/NexoraMesh.app
+          if-no-files-found: error
+          retention-days: 14
       - name: Upload iOS Rust XCFramework
         uses: actions/upload-artifact@v4
         with:
