@@ -122,6 +122,10 @@ private fun MeshApp() {
                 if (activeBlePeerId == peerId) connectionName = connectedName
             }
             override fun onMessage(message: BluetoothChatManager.ChatMessage) { peerMessages.add(message) }
+            override fun onDeliveryConfirmed(messageId: String) {
+                val index = peerMessages.indexOfFirst { it.messageId == messageId }
+                if (index >= 0) peerMessages[index] = peerMessages[index].copy(delivered = true)
+            }
             override fun onStatus(value: String) { if (activeBlePeerId == peerId) status = value }
             override fun onPeerIdentityPending(contact: ContactQr.Contact) {
                 if (activeBlePeerId == peerId) pendingContact = contact
@@ -224,6 +228,10 @@ private fun MeshApp() {
             }
             override fun onConnectionChanged(connectedName: String?) { connectionName = connectedName }
             override fun onMessage(message: BluetoothChatManager.ChatMessage) { messages.add(message) }
+            override fun onDeliveryConfirmed(messageId: String) {
+                val index = messages.indexOfFirst { it.messageId == messageId }
+                if (index >= 0) messages[index] = messages[index].copy(delivered = true)
+            }
             override fun onStatus(value: String) { status = value }
             override fun onPeerIdentityPending(contact: ContactQr.Contact) { pendingContact = contact }
             override fun onSecurityChanged(verified: Boolean, fingerprint: String?) { secureChannelActive = verified }
@@ -489,7 +497,12 @@ private fun ChatScreen(
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = if (message.outgoing) Arrangement.End else Arrangement.Start) {
                     Column(Modifier.widthIn(max = 300.dp).background(if (message.outgoing) Color(0xFF16452F) else MeshSurface, RoundedCornerShape(16.dp)).padding(12.dp)) {
                         Text(message.text, color = Color.White)
-                        Text(if (message.outgoing) "Gönderildi · yerel bağlantı" else "Alındı", color = MeshMuted, fontSize = 10.sp, modifier = Modifier.padding(top = 4.dp))
+                        Text(
+                            if (!message.outgoing) "Alındı"
+                            else if (message.delivered) "Teslim edildi · ACK doğrulandı"
+                            else "Teslim bekleniyor",
+                            color = MeshMuted, fontSize = 10.sp, modifier = Modifier.padding(top = 4.dp)
+                        )
                     }
                 }
             }
