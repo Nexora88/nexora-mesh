@@ -386,7 +386,7 @@ private fun MeshApp() {
                         onSend = { text, fingerprint ->
                             val target = activeChatManager()
                             val sent = if (fingerprint != null) target?.sendToTrustedContact(text, fingerprint) else target?.send(text)
-                            if (sent != true) status = "Mesaj gönderilemedi: hedef QR güven listesinde olmalı ve BLE oturumu hazır olmalı."
+                            if (sent != true) status = "Mesaj gönderilemedi: Bluetooth bağlantısı ve karşı tarafın doğrulanmış QR kimliği gerekli."
                         },
                         onSendMedia = { if (connectionName != null && activeChatManager() != null) mediaPickerLauncher.launch(arrayOf("*/*")) else status = "Dosya göndermek için önce eşe bağlan ve QR kimliğini doğrula." },
                         onListen = { if (manager.hasPermissions()) manager.startListening() else scanOrRequest() }
@@ -406,6 +406,7 @@ private fun MeshApp() {
                             bleTransport.connect(peer)
                         },
                         relayOptIn = relayOptIn,
+                        nativeFeaturesEnabled = BuildConfig.MESH_NATIVE_ENABLED,
                         relayQueueCount = relayStore.pendingCount(),
                         onRelayOptInChanged = { enabled ->
                             relayStore.setOptIn(enabled)
@@ -533,6 +534,7 @@ private fun DevicesScreen(
     onBleStart: () -> Unit,
     onBleConnect: (BleGattTransport.Peer) -> Unit,
     relayOptIn: Boolean,
+    nativeFeaturesEnabled: Boolean,
     relayQueueCount: Int,
     onRelayOptInChanged: (Boolean) -> Unit,
     onDevice: (BluetoothChatManager.Peer) -> Unit
@@ -560,39 +562,46 @@ private fun DevicesScreen(
                 }
             }
         }
-        HorizontalDivider(color = Color(0xFF1B3029), modifier = Modifier.padding(vertical = 8.dp))
-        Text("Ortak BLE GATT", color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold)
-        Text("BLE keşif/bağlantı taşıması. Bu ekran henüz sohbet metnini BLE zarfına bağlamaz.", color = MeshMuted, fontSize = 12.sp)
-        Button(onClick = onBleStart, modifier = Modifier.fillMaxWidth()) { Text("BLE taşımasını başlat") }
-        Text(bleStatus, color = MeshGreen, fontSize = 12.sp)
-        Row(
-            Modifier.fillMaxWidth().background(MeshSurface, RoundedCornerShape(14.dp)).padding(12.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Column(Modifier.weight(1f)) {
-                Text("Store-and-forward izni", color = Color.White, fontWeight = FontWeight.SemiBold)
-                Text("Yalnızca doğrulanmış Rust zarflarını cihazda saklar. Canlı çoklu atlama henüz etkin değil. Kuyruk: $relayQueueCount", color = MeshMuted, fontSize = 11.sp)
+        if (nativeFeaturesEnabled) {
+            HorizontalDivider(color = Color(0xFF1B3029), modifier = Modifier.padding(vertical = 8.dp))
+            Text("Ortak BLE GATT", color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+            Text("BLE keşif/bağlantı taşıması. Bu ekran henüz sohbet metnini BLE zarfına bağlamaz.", color = MeshMuted, fontSize = 12.sp)
+            Button(onClick = onBleStart, modifier = Modifier.fillMaxWidth()) { Text("BLE taşımasını başlat") }
+            Text(bleStatus, color = MeshGreen, fontSize = 12.sp)
+            Row(
+                Modifier.fillMaxWidth().background(MeshSurface, RoundedCornerShape(14.dp)).padding(12.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text("Store-and-forward izni", color = Color.White, fontWeight = FontWeight.SemiBold)
+                    Text("Yalnızca doğrulanmış Rust zarflarını cihazda saklar. Canlı çoklu atlama henüz etkin değil. Kuyruk: $relayQueueCount", color = MeshMuted, fontSize = 11.sp)
+                }
+                Switch(checked = relayOptIn, onCheckedChange = onRelayOptInChanged)
             }
-            Switch(checked = relayOptIn, onCheckedChange = onRelayOptInChanged)
-        }
-        LazyColumn(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            items(blePeers, key = { it.device.address }) { peer ->
-                Row(
-                    Modifier.fillMaxWidth().background(MeshSurface, RoundedCornerShape(14.dp))
-                        .clickable { onBleConnect(peer) }.padding(12.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Icon(Icons.Default.Devices, null, tint = MeshGreen)
-                    Spacer(Modifier.width(10.dp))
-                    Column(Modifier.weight(1f)) {
-                        Text(peer.label, color = Color.White, fontWeight = FontWeight.SemiBold)
-                        Text(peer.device.address, color = MeshMuted, fontSize = 10.sp)
+            LazyColumn(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                items(blePeers, key = { it.device.address }) { peer ->
+                    Row(
+                        Modifier.fillMaxWidth().background(MeshSurface, RoundedCornerShape(14.dp))
+                            .clickable { onBleConnect(peer) }.padding(12.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(Icons.Default.Devices, null, tint = MeshGreen)
+                        Spacer(Modifier.width(10.dp))
+                        Column(Modifier.weight(1f)) {
+                            Text(peer.label, color = Color.White, fontWeight = FontWeight.SemiBold)
+                            Text(peer.device.address, color = MeshMuted, fontSize = 10.sp)
+                        }
+                        Text("BAĞLAN", color = MeshGreen, fontSize = 10.sp, fontWeight = FontWeight.Bold)
                     }
-                    Text("BAĞLAN", color = MeshGreen, fontSize = 10.sp, fontWeight = FontWeight.Bold)
                 }
             }
+            Text("Bluetooth Classic sohbeti ve BLE GATT taşıması şu anda ayrı prototiplerdir. BLE paketleri Rust zarf doğrulamasına aktarılabilir; uygulama düzeyinde mesaj, QR kimlik doğrulaması ve E2EE henüz BLE üzerinden tamamlanmamıştır.", color = MeshMuted, fontSize = 11.sp, modifier = Modifier.padding(vertical = 8.dp))
+        } else {
+            InfoCard(
+                "Bluetooth Classic test derlemesi",
+                "Bu paket doğrudan Bluetooth Classic sohbetini ve QR ile kişi doğrulamayı içerir. BLE ve çoklu atlama özellikleri bu test paketinde kapalıdır."
+            )
         }
-        Text("Bluetooth Classic sohbeti ve BLE GATT taşıması şu anda ayrı prototiplerdir. BLE paketleri Rust zarf doğrulamasına aktarılabilir; uygulama düzeyinde mesaj, QR kimlik doğrulaması ve E2EE henüz BLE üzerinden tamamlanmamıştır.", color = MeshMuted, fontSize = 11.sp, modifier = Modifier.padding(vertical = 8.dp))
     }
 }
 
