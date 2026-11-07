@@ -478,7 +478,7 @@ class BluetoothChatManager(context: Context) {
     }
 
     private fun handleWireLine(line: String): Boolean {
-        try {
+        return try {
             require(line.length <= 2 * 1024 * 1024) { "Frame too large" }
             val frame = JSONObject(line)
             when (frame.getString("t")) {

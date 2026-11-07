@@ -91,3 +91,14 @@ This protects completed files at rest. It does **not** yet make the transfer str
 - Obtain an independent security review before real sensitive or emergency use.
 
 Nexora Mesh is not currently an emergency communications guarantee. Bluetooth range, delivery, background execution, and device interoperability are not guaranteed.
+
+
+## 8. Media, voice, and calls — verified feature boundaries
+
+- Android document picker and `sendMedia` exist. The current path encrypts media chunks in transit and checks a whole-file SHA-256 digest after reassembly, but the entire received file is held in memory before it is written. There is no media-specific authenticated completion receipt, durable chunk resume, or per-chunk retry.
+- Received media is written as plaintext in app-specific storage. App-specific storage is not the same as encrypted-at-rest storage.
+- Voice recording/playback and video calling are not implemented in the current Android app.
+- The current BLE transport must not be represented as a video-call transport. Real-time audio/video needs a suitable IP path (for example, local Wi-Fi/Wi-Fi Direct or internet) and a maintained media stack such as WebRTC.
+- WebRTC DTLS-SRTP protects a peer-to-peer media transport. If an SFU/media server is added, transport encryption alone does not prevent that server from accessing media; a separately reviewed end-to-end media layer is required.
+- Camera and microphone access must be user-initiated, permission-scoped, visibly indicated, and stopped on hang-up or interruption. No background or automatic recording is allowed.
+- See [MEDIA_AND_CALLS_PLAN.md](MEDIA_AND_CALLS_PLAN.md) for the staged feature and test plan.

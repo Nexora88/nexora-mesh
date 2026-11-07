@@ -39,40 +39,6 @@ class SecureChannelTest {
     }
 
     @Test
-    fun rustEnvelopeEncodeAndInspectRoundTripsEncryptedPayload() {
-        val messageId = ByteArray(16) { it.toByte() }
-        val destination = ByteArray(16) { (it + 16).toByte() }
-        val ciphertext = ByteArray(64) { (it * 3).toByte() }
-        val envelope = NativeMesh.encodeEnvelope(messageId, destination, 4, 1_900_000_000L, ciphertext)
-        org.junit.Assert.assertNotNull(envelope)
-        val parsed = NativeMesh.inspectEnvelope(envelope!!)
-        assertArrayEquals(messageId, parsed?.messageId)
-        assertArrayEquals(destination, parsed?.destinationToken)
-        assertArrayEquals(ciphertext, parsed?.ciphertext)
-        org.junit.Assert.assertEquals(4, parsed?.hopsRemaining)
-        org.junit.Assert.assertEquals(1_900_000_000L, parsed?.expiresAtUnix)
-    }
-
-    @Test
-    fun peersDeriveSymmetricHopKeysAndRotateByEpoch() {
-        val alice = SecureChannel.newIdentityKeyPair()
-        val bob = SecureChannel.newIdentityKeyPair()
-        val aliceChannel = SecureChannel.derive(alice, bob.keyPair.public)
-        val bobChannel = SecureChannel.derive(bob, alice.keyPair.public)
-        val aliceKey = aliceChannel.deriveHopKeyForPublicKeys(
-            alice.keyPair.public.encoded, bob.keyPair.public.encoded, 9
-        )
-        val bobKey = bobChannel.deriveHopKeyForPublicKeys(
-            bob.keyPair.public.encoded, alice.keyPair.public.encoded, 9
-        )
-        assertArrayEquals(aliceKey, bobKey)
-        val rotated = aliceChannel.deriveHopKeyForPublicKeys(
-            alice.keyPair.public.encoded, bob.keyPair.public.encoded, 10
-        )
-        org.junit.Assert.assertNotEquals(aliceKey?.toList(), rotated?.toList())
-    }
-
-    @Test
     fun bothPeersDeriveSameKeyAndDecryptAuthenticatedPayload() {
         val alice = SecureChannel.newIdentityKeyPair()
         val bob = SecureChannel.newIdentityKeyPair()

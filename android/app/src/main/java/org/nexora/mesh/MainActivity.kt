@@ -95,6 +95,21 @@ private fun MeshApp() {
     fun activeChatManager(): BluetoothChatManager? =
         activeBlePeerId?.let { blePeerManagers[it] } ?: if (activeBlePeerId == null) manager else null
 
+    fun forwardStoredToPeer(peerId: String) {
+        val nextManager = blePeerManagers[peerId] ?: return
+        val nextContext = nextManager.currentHopContext(BLE_HOP_KEY_EPOCH) ?: return
+        val now = System.currentTimeMillis() / 1000L
+        for (messageId in relayStore.pendingMessageIds()) {
+            val previousHop = relayStore.lastHopNodeId(messageId) ?: continue
+            if (previousHop.contentEquals(nextContext.remoteNodeId)) continue
+            val forwarded = relayStore.peekForNextHop(messageId, now) ?: continue
+            if (bleTransport.sendEnvelope(peerId, forwarded)) {
+                bleStatus = "Saklanan zarf eşe özel BLE oturumundan iletildi."
+                return
+            }
+        }
+    }
+
     fun attachBlePeerManager(peerId: String, peerLabel: String) {
         val peerManager = blePeerManagers[peerId] ?: BluetoothChatManager(context).also {
             blePeerManagers[peerId] = it
@@ -127,21 +142,6 @@ private fun MeshApp() {
             val outgoing = peerManager.wrapBlePacket(packet, System.currentTimeMillis() / 1000L) ?: return@attachBleTransport false
             if (relayOptInState.value && NativeMesh.inspectEnvelope(outgoing) != null) relayStore.enqueue(outgoing)
             bleTransport.sendEnvelope(peerId, outgoing)
-        }
-    }
-
-    fun forwardStoredToPeer(peerId: String) {
-        val nextManager = blePeerManagers[peerId] ?: return
-        val nextContext = nextManager.currentHopContext(BLE_HOP_KEY_EPOCH) ?: return
-        val now = System.currentTimeMillis() / 1000L
-        for (messageId in relayStore.pendingMessageIds()) {
-            val previousHop = relayStore.lastHopNodeId(messageId) ?: continue
-            if (previousHop.contentEquals(nextContext.remoteNodeId)) continue
-            val forwarded = relayStore.peekForNextHop(messageId, now) ?: continue
-            if (bleTransport.sendEnvelope(peerId, forwarded)) {
-                bleStatus = "Saklanan zarf eşe özel BLE oturumundan iletildi."
-                return
-            }
         }
     }
 

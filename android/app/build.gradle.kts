@@ -6,6 +6,8 @@ plugins {
 android {
     namespace = "org.nexora.mesh"
     compileSdk = 35
+    buildToolsVersion = "35.0.0"
+    ndkVersion = "27.2.12479018"
     defaultConfig {
         applicationId = "org.nexora.mesh"
         minSdk = 26

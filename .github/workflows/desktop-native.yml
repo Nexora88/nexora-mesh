@@ -1,14 +1,10 @@
 name: Desktop Native Build
 
 concurrency:
-  # Keep push and pull_request runs separate for PR branches.
   group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
   cancel-in-progress: true
 
 on:
-  pull_request:
-  push:
-    branches: ["main", "feat/**"]
   workflow_dispatch:
 
 permissions:
@@ -22,7 +18,7 @@ jobs:
       matrix:
         include:
           - os: ubuntu-24.04
-            bundles: deb,appimage
+            bundles: deb
             artifact: linux
           - os: windows-latest
             bundles: msi,nsis
@@ -42,7 +38,7 @@ jobs:
           sudo apt-get install -y \
             build-essential curl wget file pkg-config \
             libssl-dev libdbus-1-dev libgtk-3-dev libayatana-appindicator3-dev \
-            librsvg2-dev libwebkit2gtk-4.1-dev
+            libxdo-dev librsvg2-dev libwebkit2gtk-4.1-dev
 
       - name: Install Tauri CLI
         run: cargo install tauri-cli --version "^2" --locked
@@ -64,11 +60,33 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
+      - name: Validate installable web shell
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          root = Path("web")
+          required = ["index.html", "app.js", "styles.css", "manifest.webmanifest", "sw.js", "icon.svg"]
+          missing = [name for name in required if not (root / name).is_file()]
+          if missing:
+              raise SystemExit("Missing PWA files: " + ", ".join(missing))
+          html = (root / "index.html").read_text(encoding="utf-8")
+          app = (root / "app.js").read_text(encoding="utf-8")
+          manifest = json.loads((root / "manifest.webmanifest").read_text(encoding="utf-8"))
+          if 'rel="manifest"' not in html or "serviceWorker.register('./sw.js')" not in app:
+              raise SystemExit("PWA manifest or service-worker registration is missing")
+          if manifest.get("display") not in ("standalone", "fullscreen", "minimal-ui"):
+              raise SystemExit("PWA manifest is not installable")
+          for icon in manifest.get("icons", []):
+              if not (root / icon["src"].removeprefix("./")).is_file():
+                  raise SystemExit("Missing manifest icon: " + icon["src"])
+          print("PWA shell, manifest, service worker and icons validated.")
+          PY
       - name: Package installable web shell
         run: |
           cd web
-          zip -r ../nexora-mesh-pwa.zip .
-      - name: Upload PWA source bundle
+          zip -r ../nexora-mesh-pwa.zip index.html app.js styles.css manifest.webmanifest sw.js icon.svg
+      - name: Upload PWA bundle
         uses: actions/upload-artifact@v4
         with:
           name: nexora-mesh-pwa

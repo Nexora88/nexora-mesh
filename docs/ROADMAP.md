@@ -19,43 +19,49 @@
 - [ ] Connect two physical devices with internet access disabled
 
 ## M2 — Identity, trust, and messages
-- [ ] Stable device identity backed by platform-appropriate key storage
-- [ ] Pairing approved on both devices, with QR/code fingerprint verification
-- [ ] Separate untrusted nearby devices from trusted contacts
-- [ ] End-to-end encryption using reviewed libraries and a documented protocol
+- [x] Stable Android identity backed by platform-appropriate key storage
+- [x] Pairing approved on both devices, with QR/code fingerprint verification
+- [ ] Replace custom static-ECDH channel with a reviewed protocol/library providing forward secrecy and replay resistance
 - [ ] Persistent local message database
-- [ ] Queued/sent/delivered/failed states based on actual transport acknowledgements
+- [ ] Queued/sent/delivered/failed states based on actual authenticated receipts
 - [ ] Reconnect, retry, replay protection, and key-change warnings
+- [ ] Matching iOS identity/QR/session/chat implementation
 
-## M3 — Range extension and emergency resilience
+## M3 — Range extension and resilience
 - [x] Message IDs, expiry, hop limit, deduplication, and store-and-forward queue (Rust + snapshot API)
 - [x] Explicit relay opt-in foundation and battery/thermal-aware scan policy
 - [x] In-memory and Python multi-node simulation tests
-- [ ] Ensure relays cannot read message plaintext (opaque envelope; E2E still pending)
+- [ ] Ensure relays cannot read message plaintext (opaque envelope; E2EE still requires protocol replacement)
 - [ ] Field tests across line-of-sight and obstructed terrain; publish measured results only
 - [ ] Clear emergency limitations and failed-delivery UX
 - [ ] Physical-device verification of encrypted A→B→C transfer, persistent queue, TTL, dedup and delivery confirmation
 
-## M4 — Everyday messenger experience
-- [x] Existing Android bounded file-chunk prototype and whole-file SHA-256 verification
-- [x] Encrypt completed incoming media at rest with an Android Keystore AES-GCM key
-- [ ] Stream file chunks without whole-file memory buffering
-- [ ] Authenticated chunk receipts, bounded retry, durable resume, and final completion receipt
-- [ ] Explicit encrypted-vault preview/export flow
-- [ ] Voice notes with user-triggered microphone permission, preview, discard, and explicit send
-- [ ] Video attachments with explicit picker/capture and preview
+## M4 — Secure media messaging
+- [x] Android document picker and bounded encrypted-media prototype (64 MiB, 16 KiB chunks, SHA-256 reassembly check)
+- [ ] Streaming disk-backed media I/O (avoid whole-file memory allocation)
+- [ ] Transfer offer/accept, authenticated chunk ACK, retry/resume, and final delivery receipt
+- [ ] Encrypt received media at rest with per-file keys protected by Android Keystore
+- [ ] Explicit photo/video/file picker and camera preview; no automatic upload or export
+- [ ] Voice recording with preview/cancel and explicit playback
+- [ ] Physical Android-to-Android media transfer and interruption/resume tests
+- [ ] iOS media protocol parity and Android↔iOS interoperability
+
+## M5 — Voice and video calls
+- [ ] 1:1 voice/video call invitation bound to QR-verified identity
+- [ ] WebRTC media over local Wi-Fi/IP or internet; BLE is discovery/control only, not the video bearer
+- [ ] DTLS-SRTP, authenticated signaling, explicit permissions, visible capture indicators and reliable hang-up cleanup
+- [ ] TURN fallback privacy review and metadata disclosure
+- [ ] iOS parity and physical-device call tests
+- [ ] Independent security review before sensitive-use claims
+
+## M6 — Group calling (separate security milestone)
+- [ ] Group membership, identity changes, and key lifecycle threat model
+- [ ] Reviewed group E2EE media design; transport encryption alone is insufficient for SFU privacy
+- [ ] Load, abuse, privacy, and cross-platform interoperability tests
+
+## M7 — Platform polish
 - [ ] Accessibility and Turkish/English localization
 - [ ] Battery, reconnect, and privacy testing
+- [ ] Installable PWA management console + native desktop radio bridge (Tauri)
 
-## M5 — One-to-one WebRTC calls
-- [ ] IP media path (local Wi-Fi and internet); BLE limited to discovery/control
-- [ ] QR-identity-authenticated call invitations and signaling transcript
-- [ ] Maintained WebRTC stack with DTLS-SRTP and network-change handling
-- [ ] Explicit microphone/camera permissions, accept/decline, and no automatic recording
-- [ ] Real-device call quality, permission-denial, TURN, and security tests
-
-## M6 — Group calls
-- [ ] Evaluate SFU only after M5 passes; add separate reviewed frame-level E2EE
-- [ ] Group membership changes, key rotation, and real-device load tests
-
-A UI mockup does not count as a working transport. A wider mesh can improve reach, but does not guarantee a range or delivery. The current custom static-ECDH session is experimental and does not provide forward secrecy; do not use it for sensitive communication.
+A UI mockup does not count as a working transport. BLE does not provide a viable video-call media path. A wider mesh can improve reach, but does not guarantee range or delivery. An APK build does not certify security or feature completeness.
