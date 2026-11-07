@@ -26,8 +26,8 @@ pub fn derive_hop_key(
     if peer_a == peer_b {
         return Err(HopKeyError::SamePeer);
     }
-    let mut extract = Hmac::<Sha256>::new_from_slice(SALT)
-        .map_err(|_| HopKeyError::KdfInitialization)?;
+    let mut extract =
+        Hmac::<Sha256>::new_from_slice(SALT).map_err(|_| HopKeyError::KdfInitialization)?;
     extract.update(shared_secret);
     let prk = extract.finalize().into_bytes();
     let (first, second) = if peer_a < peer_b {
@@ -35,8 +35,8 @@ pub fn derive_hop_key(
     } else {
         (peer_b, peer_a)
     };
-    let mut expand = Hmac::<Sha256>::new_from_slice(&prk)
-        .map_err(|_| HopKeyError::KdfInitialization)?;
+    let mut expand =
+        Hmac::<Sha256>::new_from_slice(&prk).map_err(|_| HopKeyError::KdfInitialization)?;
     expand.update(INFO);
     expand.update(first);
     expand.update(second);
