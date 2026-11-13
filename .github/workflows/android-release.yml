@@ -2,9 +2,15 @@ name: Android APK Release
 
 on:
   push:
+    branches:
+      - main
     tags:
       - "v*"
   workflow_dispatch:
+
+concurrency:
+  group: android-apk-${{ github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: write
@@ -24,18 +30,20 @@ jobs:
           distribution: temurin
           java-version: "17"
 
+      # Android SDK terms must be reviewed and accepted by an authorized owner
+      # (and, where appropriate, a parent/guardian) before enabling this build.
       - name: Require Android SDK license approval
         env:
           ANDROID_SDK_LICENSES_ACCEPTED: ${{ vars.ANDROID_SDK_LICENSES_ACCEPTED }}
         run: |
           if [ "$ANDROID_SDK_LICENSES_ACCEPTED" != "true" ]; then
-            echo "::error::A parent/guardian or authorized repository owner must review the Android SDK license and set ANDROID_SDK_LICENSES_ACCEPTED=true before this build."
+            echo "::error::Review the Android SDK license, then set ANDROID_SDK_LICENSES_ACCEPTED=true in repository Actions variables."
             exit 1
           fi
 
       - uses: android-actions/setup-android@v4
         with:
-          accept-android-sdk-licenses: ${{ vars.ANDROID_SDK_LICENSES_ACCEPTED }}
+          accept-android-sdk-licenses: true
           packages: ''
 
       - name: Install Android SDK components
@@ -47,23 +55,37 @@ jobs:
       - name: Build Rust core for Android ABIs
         run: cargo ndk -t arm64-v8a -t x86_64 -o android/app/src/main/jniLibs build --release -p mesh-core
 
-      - uses: gradle/actions/setup-gradle@v4
-        with:
-          gradle-version: "8.9"
+      - name: Run Android unit tests and assemble APK
+        working-directory: android
+        run: |
+          bash ./gradlew testDebugUnitTest
+          bash ./gradlew assembleDebug
 
-      - name: Run Android unit tests
-        run: gradle -p android testDebugUnitTest
+      - name: Prepare APK and checksum
+        run: |
+          mkdir -p dist/android
+          cp android/app/build/outputs/apk/debug/app-debug.apk dist/android/NexoraMesh-Android-debug.apk
+          cd dist/android
+          sha256sum NexoraMesh-Android-debug.apk > SHA256SUMS.txt
+          {
+            echo "Nexora Mesh Android debug build"
+            echo "Commit: $GITHUB_SHA"
+            echo "Run: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+            echo "Package: org.nexora.mesh"
+            echo "Minimum Android: 8.0 (API 26)"
+            echo "Build type: debug; test use only"
+          } > BUILD-INFO.txt
 
-      - name: Assemble installable debug APK
-        run: gradle -p android assembleDebug
-
-      - name: Upload APK artifact
+      - name: Upload installable debug APK artifact
         uses: actions/upload-artifact@v4
         with:
           name: nexora-mesh-android-debug
-          path: android/app/build/outputs/apk/debug/app-debug.apk
+          path: |
+            dist/android/NexoraMesh-Android-debug.apk
+            dist/android/SHA256SUMS.txt
+            dist/android/BUILD-INFO.txt
           if-no-files-found: error
-          retention-days: 30
+          retention-days: 90
 
       - name: Publish APK on GitHub Release
         if: startsWith(github.ref, 'refs/tags/v')
@@ -71,4 +93,7 @@ jobs:
         with:
           name: Nexora Mesh ${{ github.ref_name }}
           generate_release_notes: true
-          files: android/app/build/outputs/apk/debug/app-debug.apk
+          files: |
+            dist/android/NexoraMesh-Android-debug.apk
+            dist/android/SHA256SUMS.txt
+            dist/android/BUILD-INFO.txt

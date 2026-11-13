@@ -1,23 +1,36 @@
 # Android APK indirme ve kurma
 
-Nexora Mesh şu anda erken geliştirme prototipidir. APK'nın derlenmesi, iki telefonda Bluetooth bağlantısının doğrulanması veya güvenlik denetiminin tamamlanması anlamına gelmez.
+Nexora Mesh erken geliştirme prototipidir. APK'nın derlenmesi, iki telefonda Bluetooth bağlantısının doğrulanması veya güvenlik denetiminin tamamlandığı anlamına gelmez.
 
-## Test APK'sını GitHub Actions'tan indirme
+## Tek bağlantıyla en son yayımlanan APK
 
-1. Depoda **Actions → CI** sayfasını aç.
-2. Başarılı bir CI çalışmasını seç.
-3. Sayfanın altındaki **Artifacts** bölümünden `nexora-mesh-android-debug` dosyasını indir.
-4. ZIP dosyasını aç; içindeki `app-debug.apk` dosyasını Android telefona aktar.
-5. Android, tarayıcı/dosya yöneticisi üzerinden kurulum için izin isteyebilir. Yalnızca bu açık kaynak depodan ve beklediğin derlemeden indirdiğin APK'yı kur; bilinmeyen APK'lara izin verme.
+İlk kararlı sürüm GitHub Release olarak yayımlandıktan sonra şu sabit bağlantı en son yayımlanan APK'yı indirir:
 
-GitHub Actions artefaktı süre sınırlıdır ve sürüm yayımlama yerine geçmez.
+[**Nexora Mesh Android APK — indir**](https://github.com/Nexora88/nexora-mesh/releases/latest/download/NexoraMesh-Android-debug.apk)
 
-## Sürüm indirmesi
+Bu bağlantı, henüz bir sürüm yayımlanmadıysa çalışmaz. Yeni sürüm etiketi (`v*`) gönderildiğinde GitHub Actions APK'yı yeniden derler, birim testlerini çalıştırır ve APK'yı Release dosyası olarak ekler.
 
-`.github/workflows/android-release.yml` sürüm etiketi `v*` gönderildiğinde Android debug APK'yı derleyip GitHub Releases'a ekleyecek şekilde hazırlanmıştır. Henüz yayınlanmış bir sürüm yoktur. Sürüm oluşturulmadan önce CI, cihaz testi, imzalama ve güvenlik sınırları değerlendirilmelidir.
+## Her başarılı ana dal derlemesinin APK'sı
 
-Bu akış **debug APK** üretir; üretim dağıtımına uygun, özel anahtarla imzalanmış bir sürüm değildir. Herkese açık bir APK yayımlamadan önce ayrı ve güvenli bir release signing düzeni kurulmalıdır. İmzalama anahtarı veya parolası depoya yazılmamalıdır.
+`.github/workflows/android-release.yml` ana dala her yeni commit geldiğinde de çalışır:
 
-## Uygulama durumu
+1. Depoda **Actions → Android APK Release** sayfasını aç.
+2. En son başarılı çalışmayı seç.
+3. **Artifacts → nexora-mesh-android-debug** paketini indir.
+4. ZIP içindeki APK'yı Android cihazına aktar.
 
-Şu anki uygulama doğrudan Bluetooth Classic üzerinden metin sohbeti prototipidir. Çok atlamalı aktarım çekirdeği Rust tarafında test edilebilir bir başlangıçtır, ancak Android radyo katmanına bağlanmamıştır. E2EE, Apple ile cihazlar arası iletişim ve medya aktarımı tamamlanmamıştır. Acil durumlarda güvenilir haberleşme aracı olarak kullanılmamalıdır.
+Actions artefaktı 90 gün saklanır. Release bağlantısı ise yayımlanan sürüm kaldırılmadığı sürece kalıcıdır.
+
+## Android SDK lisans onayı
+
+Android SDK lisans koşulları otomatik olarak kabul edilmez. Yetkili depo sahibi lisansı inceleyip kabul ettikten sonra GitHub deposunda **Settings → Secrets and variables → Actions → Variables** bölümüne `ANDROID_SDK_LICENSES_ACCEPTED=true` değişkenini eklemelidir. Bu değişken olmadan Android derlemesi güvenli biçimde durur.
+
+## Kurulum ve güvenlik notları
+
+- Paket kimliği: `org.nexora.mesh`
+- Minimum Android: 8.0 (API 26)
+- Üretilen paket: debug APK; üretim dağıtımı için imzalı release APK değildir.
+- İmzalama anahtarı veya parolası depoya eklenmemelidir.
+- Yalnızca beklediğin Nexora Mesh deposundan indirdiğin APK'yı kur.
+
+Mevcut uygulama erken aşamadadır. Fiziksel iki cihaz testi ve bağımsız güvenlik incelemesi tamamlanmadan acil durum iletişimi için güvenilir araç olarak değerlendirilmemelidir.
