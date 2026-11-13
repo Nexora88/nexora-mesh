@@ -15,9 +15,7 @@ import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
-import android.os.Environment
 import java.io.File
-import java.io.FileOutputStream
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 import android.util.Base64
@@ -38,12 +36,19 @@ import java.util.concurrent.atomic.AtomicBoolean
  */
 class BluetoothChatManager(context: Context) {
     data class Peer(val device: BluetoothDevice, val name: String, val address: String, val bonded: Boolean)
-    data class ChatMessage(val text: String, val outgoing: Boolean, val timestamp: Long = System.currentTimeMillis())
+    data class ChatMessage(
+        val text: String,
+        val outgoing: Boolean,
+        val timestamp: Long = System.currentTimeMillis(),
+        val messageId: String? = null,
+        val delivered: Boolean = false
+    )
 
     interface Listener {
         fun onDevicesChanged(devices: List<Peer>, scanning: Boolean)
         fun onConnectionChanged(connectedName: String?)
         fun onMessage(message: ChatMessage)
+        fun onDeliveryConfirmed(messageId: String) {}
         fun onStatus(status: String)
         fun onPeerIdentityPending(contact: ContactQr.Contact) {}
         fun onSecurityChanged(verified: Boolean, fingerprint: String?) {}
@@ -440,8 +445,10 @@ class BluetoothChatManager(context: Context) {
                 status("Çevrimdışı kuyruk dolu veya kalıcı kaydedilemedi; mesaj gönderilmedi.")
                 return false
             }
+            mainHandler.post {
+                listeners.forEach { it.onMessage(ChatMessage(normalized, true, messageId = messageId)) }
+            }
             val sent = sendWire(frame)
-            mainHandler.post { listeners.forEach { it.onMessage(ChatMessage(normalized, true)) } }
             if (!sent) status("Mesaj E2EE zarfa dönüştürülüp çevrimdışı kuyruğa kaydedildi; teslim onayı bekleniyor.")
             scheduleDeliveryRetry(messageId, 0)
             true
@@ -480,7 +487,7 @@ class BluetoothChatManager(context: Context) {
     }
 
     private fun handleWireLine(line: String): Boolean {
-        try {
+        return try {
             require(line.length <= 2 * 1024 * 1024) { "Frame too large" }
             val frame = JSONObject(line)
             when (frame.getString("t")) {
@@ -548,11 +555,21 @@ class BluetoothChatManager(context: Context) {
                     val ciphertext = Base64.decode(frame.getString("c"), Base64.DEFAULT)
                     val plaintext = channel.decrypt(SecureChannel.Sealed(nonce, ciphertext),
                         dataAad(messageId, fromFingerprint, toFingerprint, toNodeText, expiresAt))
-                    val isNew = rememberIncomingMessageId(messageId)
-                    sendDeliveryAck(messageId, channel, fromFingerprint)
-                    if (isNew) {
-                        val text = plaintext.toString(StandardCharsets.UTF_8)
-                        mainHandler.post { listeners.forEach { it.onMessage(ChatMessage(text, false)) } }
+                    when (rememberIncomingMessageId(messageId)) {
+                        ReplayRememberResult.ADDED -> {
+                            sendDeliveryAck(messageId, channel, fromFingerprint)
+                            val text = plaintext.toString(StandardCharsets.UTF_8)
+                            mainHandler.post {
+                                listeners.forEach {
+                                    it.onMessage(ChatMessage(text, false, messageId = messageId, delivered = true))
+                                }
+                            }
+                        }
+                        ReplayRememberResult.DUPLICATE -> sendDeliveryAck(messageId, channel, fromFingerprint)
+                        ReplayRememberResult.PERSISTENCE_FAILED ->
+                            throw IllegalStateException("Replay state could not be persisted; delivery ACK withheld")
+                        ReplayRememberResult.INVALID ->
+                            throw IllegalArgumentException("Invalid message ID; delivery ACK withheld")
                     }
                 }
                 "ACK" -> {
@@ -688,11 +705,9 @@ class BluetoothChatManager(context: Context) {
         ) ?: return
         val safeName = (mediaNames[id] ?: name).substringAfterLast('/').substringAfterLast('\\')
             .replace(Regex("[^A-Za-z0-9._-]"), "_").take(80).ifBlank { "media.bin" }
-        val directory = appContext.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS)
-            ?: File(appContext.filesDir, "received-media")
-        check(directory.exists() || directory.mkdirs()) { "Cannot create media directory" }
-        val saved = File(directory, id + "_" + safeName)
-        FileOutputStream(saved).use { it.write(completed) }
+        // Never persist received media as plaintext. The vault uses a non-exportable
+        // Android Keystore AES-GCM key and app-private storage.
+        val saved = MediaVault(appContext).store(id, safeName, completed)
         mediaReassemblers.remove(id)
         mediaNames.remove(id)
         mainHandler.post {
@@ -724,7 +739,7 @@ class BluetoothChatManager(context: Context) {
         }
     }
 
-    private fun rememberIncomingMessageId(id: String): Boolean = replayWindow.remember(id)
+    private fun rememberIncomingMessageId(id: String): ReplayRememberResult = replayWindow.rememberResult(id)
 
     private fun enqueuePending(id: String, frame: JSONObject): Boolean =
         synchronized(pendingLock) { pendingMessages.enqueue(id, frame.toString()) }
@@ -744,6 +759,7 @@ class BluetoothChatManager(context: Context) {
         if (persisted) {
             retryAttempts.remove(id)
             persistRetryAttempts()
+            mainHandler.post { listeners.forEach { it.onDeliveryConfirmed(id) } }
             status("Teslim onayı alındı: $id")
         } else {
             status("Teslim onayı kalıcı kaydedilemedi; mesaj kuyruğunda tutuluyor: $id")

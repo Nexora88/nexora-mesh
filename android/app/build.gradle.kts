@@ -3,18 +3,27 @@ plugins {
     id("org.jetbrains.kotlin.android")
     id("org.jetbrains.kotlin.plugin.compose")
 }
+
+val directChatOnly = (project.findProperty("meshDirectChatOnly") as String?)?.toBoolean() ?: false
 android {
     namespace = "org.nexora.mesh"
     compileSdk = 35
+    buildToolsVersion = "35.0.0"
+    ndkVersion = "27.2.12479018"
     defaultConfig {
         applicationId = "org.nexora.mesh"
         minSdk = 26
         targetSdk = 35
         versionCode = 1
         versionName = "0.1.0"
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         ndk { abiFilters += listOf("arm64-v8a", "x86_64") }
+        buildConfigField("boolean", "MESH_NATIVE_ENABLED", (!directChatOnly).toString())
+        externalNativeBuild {
+            cmake { arguments += listOf("-DMESH_NATIVE_ENABLED=${if (directChatOnly) "OFF" else "ON"}") }
+        }
     }
-    buildFeatures { compose = true }
+    buildFeatures { compose = true; buildConfig = true }
     externalNativeBuild {
         cmake { path = file("src/main/cpp/CMakeLists.txt"); version = "3.22.1" }
     }
@@ -38,5 +47,7 @@ dependencies {
     implementation("com.google.zxing:core:3.5.3")
     implementation("com.journeyapps:zxing-android-embedded:4.3.0")
     testImplementation("junit:junit:4.13.2")
+    androidTestImplementation("androidx.test:runner:1.6.2")
+    androidTestImplementation("androidx.test.ext:junit:1.2.1")
     debugImplementation("androidx.compose.ui:ui-tooling")
 }

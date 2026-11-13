@@ -18,7 +18,7 @@ The first transport uses Bluetooth Classic RFCOMM. The user starts device discov
 
 See [Android two-device test instructions](docs/ANDROID_BLUETOOTH_TEST.md).
 
-**Important boundaries:** this is one direct connection at a time. Android system bonding is the initial trust gate, not a substitute for an app-level identity-verification protocol. App-level QR/code verification, reviewed end-to-end encryption, durable message storage, delivery receipts, Apple interoperability, and mesh relaying are still future work. CI compilation does not prove that physical-device Bluetooth behavior works.
+**Important boundaries:** this is one direct connection at a time. The Android direct-session code now includes QR-fingerprint-based peer trust, ECDH/AES-GCM session encryption, replay checks, and authenticated delivery acknowledgements. These code paths have not received an independent cryptographic audit or been verified in a two-physical-device offline exchange. Forward secrecy, durable chat history, Apple interoperability, and live mesh relaying remain incomplete. CI compilation and a locally built APK do not prove physical-device Bluetooth delivery.
 
 ## Discovery and trust
 
@@ -33,9 +33,12 @@ Privacy should be the default. Discovery is user-triggered rather than continuou
 - [x] Android Bluetooth discovery and system-bonding flow implemented in source (physical testing pending)
 - [x] Direct RFCOMM text transport implemented in source (physical testing pending)
 - [x] Product vision, threat model, roadmap, and two-device test instructions
+- [x] Local direct-chat debug APK built and its Android debug signature verified (physical installation still pending)
 - [ ] Android CI build and physical-device installation verified
 - [ ] Successful two-way message exchange on two physical Android devices with internet disabled
-- [ ] App-level identity verification and reviewed end-to-end encryption
+- [x] QR-fingerprint peer verification and ECDH/AES-GCM direct-session code implemented (independent review and physical verification pending)
+- [x] Authenticated delivery-acknowledgement code path implemented (physical verification pending)
+- [ ] Independent security review and forward secrecy
 - [ ] Persistent chat history and reliable delivery states
 - [ ] Xcode project and physical iOS build
 - [ ] Opt-in mesh relaying and field range tests

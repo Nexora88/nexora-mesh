@@ -5,6 +5,13 @@ use sha2::Sha256;
 const SALT: &[u8] = b"NexoraMesh/hop-key/extract/v1";
 const INFO: &[u8] = b"NexoraMesh/BLE-STORE-ACK/v1";
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HopKeyError {
+    WeakSecret,
+    SamePeer,
+    KdfInitialization,
+}
+
 /// Derive the same key on both peers, bound to stable peer IDs and an epoch.
 /// Never pass an end-to-end message key here.
 pub fn derive_hop_key(
@@ -12,11 +19,15 @@ pub fn derive_hop_key(
     peer_a: &[u8; 16],
     peer_b: &[u8; 16],
     epoch: u64,
-) -> Result<[u8; 32], ()> {
-    if shared_secret.len() < 32 || peer_a == peer_b {
-        return Err(());
+) -> Result<[u8; 32], HopKeyError> {
+    if shared_secret.len() < 32 {
+        return Err(HopKeyError::WeakSecret);
     }
-    let mut extract = Hmac::<Sha256>::new_from_slice(SALT).map_err(|_| ())?;
+    if peer_a == peer_b {
+        return Err(HopKeyError::SamePeer);
+    }
+    let mut extract =
+        Hmac::<Sha256>::new_from_slice(SALT).map_err(|_| HopKeyError::KdfInitialization)?;
     extract.update(shared_secret);
     let prk = extract.finalize().into_bytes();
     let (first, second) = if peer_a < peer_b {
@@ -24,7 +35,8 @@ pub fn derive_hop_key(
     } else {
         (peer_b, peer_a)
     };
-    let mut expand = Hmac::<Sha256>::new_from_slice(&prk).map_err(|_| ())?;
+    let mut expand =
+        Hmac::<Sha256>::new_from_slice(&prk).map_err(|_| HopKeyError::KdfInitialization)?;
     expand.update(INFO);
     expand.update(first);
     expand.update(second);
@@ -61,7 +73,13 @@ mod tests {
     }
     #[test]
     fn rejects_weak_secret_and_same_peer() {
-        assert!(derive_hop_key(&[1u8; 31], &[1; 16], &[2; 16], 1).is_err());
-        assert!(derive_hop_key(&[1u8; 32], &[1; 16], &[1; 16], 1).is_err());
+        assert_eq!(
+            derive_hop_key(&[1u8; 31], &[1; 16], &[2; 16], 1),
+            Err(HopKeyError::WeakSecret)
+        );
+        assert_eq!(
+            derive_hop_key(&[1u8; 32], &[1; 16], &[1; 16], 1),
+            Err(HopKeyError::SamePeer)
+        );
     }
 }

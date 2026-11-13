@@ -95,41 +95,6 @@ private fun MeshApp() {
     fun activeChatManager(): BluetoothChatManager? =
         activeBlePeerId?.let { blePeerManagers[it] } ?: if (activeBlePeerId == null) manager else null
 
-    fun attachBlePeerManager(peerId: String, peerLabel: String) {
-        val peerManager = blePeerManagers[peerId] ?: BluetoothChatManager(context).also {
-            blePeerManagers[peerId] = it
-        }
-        blePeerListeners.remove(peerId)?.let(peerManager::removeListener)
-        val peerMessages = blePeerMessages.getOrPut(peerId) { mutableStateListOf() }
-        val peerListener = object : BluetoothChatManager.Listener {
-            override fun onDevicesChanged(next: List<BluetoothChatManager.Peer>, isScanning: Boolean) {}
-            override fun onConnectionChanged(connectedName: String?) {
-                if (activeBlePeerId == peerId) connectionName = connectedName
-            }
-            override fun onMessage(message: BluetoothChatManager.ChatMessage) { peerMessages.add(message) }
-            override fun onStatus(value: String) { if (activeBlePeerId == peerId) status = value }
-            override fun onPeerIdentityPending(contact: ContactQr.Contact) {
-                if (activeBlePeerId == peerId) pendingContact = contact
-            }
-            override fun onSecurityChanged(verified: Boolean, fingerprint: String?) {
-                if (activeBlePeerId == peerId) secureChannelActive = verified
-                if (verified) forwardStoredToPeer(peerId)
-            }
-            override fun onMediaReceived(fileName: String, savedPath: String, sizeBytes: Int) {
-                peerMessages.add(BluetoothChatManager.ChatMessage(
-                    "Dosya alındı ve bütünlüğü doğrulandı: $fileName ($sizeBytes bayt). Kaydedildi: $savedPath", false
-                ))
-            }
-        }
-        blePeerListeners[peerId] = peerListener
-        peerManager.addListener(peerListener)
-        peerManager.attachBleTransport(peerLabel) { packet ->
-            val outgoing = peerManager.wrapBlePacket(packet, System.currentTimeMillis() / 1000L) ?: return@attachBleTransport false
-            if (relayOptInState.value && NativeMesh.inspectEnvelope(outgoing) != null) relayStore.enqueue(outgoing)
-            bleTransport.sendEnvelope(peerId, outgoing)
-        }
-    }
-
     fun forwardStoredToPeer(peerId: String) {
         val nextManager = blePeerManagers[peerId] ?: return
         val nextContext = nextManager.currentHopContext(BLE_HOP_KEY_EPOCH) ?: return
@@ -142,6 +107,45 @@ private fun MeshApp() {
                 bleStatus = "Saklanan zarf eşe özel BLE oturumundan iletildi."
                 return
             }
+        }
+    }
+
+    fun attachBlePeerManager(peerId: String, peerLabel: String) {
+        val peerManager = blePeerManagers[peerId] ?: BluetoothChatManager(context).also {
+            blePeerManagers[peerId] = it
+        }
+        blePeerListeners.remove(peerId)?.let(peerManager::removeListener)
+        val peerMessages = blePeerMessages.getOrPut(peerId) { mutableStateListOf() }
+        val peerListener = object : BluetoothChatManager.Listener {
+            override fun onDevicesChanged(next: List<BluetoothChatManager.Peer>, isScanning: Boolean) {}
+            override fun onConnectionChanged(connectedName: String?) {
+                if (activeBlePeerId == peerId) connectionName = connectedName
+            }
+            override fun onMessage(message: BluetoothChatManager.ChatMessage) { peerMessages.add(message) }
+            override fun onDeliveryConfirmed(messageId: String) {
+                val index = peerMessages.indexOfFirst { it.messageId == messageId }
+                if (index >= 0) peerMessages[index] = peerMessages[index].copy(delivered = true)
+            }
+            override fun onStatus(value: String) { if (activeBlePeerId == peerId) status = value }
+            override fun onPeerIdentityPending(contact: ContactQr.Contact) {
+                if (activeBlePeerId == peerId) pendingContact = contact
+            }
+            override fun onSecurityChanged(verified: Boolean, fingerprint: String?) {
+                if (activeBlePeerId == peerId) secureChannelActive = verified
+                if (verified) forwardStoredToPeer(peerId)
+            }
+            override fun onMediaReceived(fileName: String, savedPath: String, sizeBytes: Int) {
+                peerMessages.add(BluetoothChatManager.ChatMessage(
+                    "Dosya alındı ve bütünlüğü doğrulandı: $fileName ($sizeBytes bayt). Uygulama içindeki şifreli kasaya kaydedildi.", false
+                ))
+            }
+        }
+        blePeerListeners[peerId] = peerListener
+        peerManager.addListener(peerListener)
+        peerManager.attachBleTransport(peerLabel) { packet ->
+            val outgoing = peerManager.wrapBlePacket(packet, System.currentTimeMillis() / 1000L) ?: return@attachBleTransport false
+            if (relayOptInState.value && NativeMesh.inspectEnvelope(outgoing) != null) relayStore.enqueue(outgoing)
+            bleTransport.sendEnvelope(peerId, outgoing)
         }
     }
 
@@ -224,6 +228,10 @@ private fun MeshApp() {
             }
             override fun onConnectionChanged(connectedName: String?) { connectionName = connectedName }
             override fun onMessage(message: BluetoothChatManager.ChatMessage) { messages.add(message) }
+            override fun onDeliveryConfirmed(messageId: String) {
+                val index = messages.indexOfFirst { it.messageId == messageId }
+                if (index >= 0) messages[index] = messages[index].copy(delivered = true)
+            }
             override fun onStatus(value: String) { status = value }
             override fun onPeerIdentityPending(contact: ContactQr.Contact) { pendingContact = contact }
             override fun onSecurityChanged(verified: Boolean, fingerprint: String?) { secureChannelActive = verified }
@@ -378,7 +386,7 @@ private fun MeshApp() {
                         onSend = { text, fingerprint ->
                             val target = activeChatManager()
                             val sent = if (fingerprint != null) target?.sendToTrustedContact(text, fingerprint) else target?.send(text)
-                            if (sent != true) status = "Mesaj gönderilemedi: hedef QR güven listesinde olmalı ve BLE oturumu hazır olmalı."
+                            if (sent != true) status = "Mesaj gönderilemedi: Bluetooth bağlantısı ve karşı tarafın doğrulanmış QR kimliği gerekli."
                         },
                         onSendMedia = { if (connectionName != null && activeChatManager() != null) mediaPickerLauncher.launch(arrayOf("*/*")) else status = "Dosya göndermek için önce eşe bağlan ve QR kimliğini doğrula." },
                         onListen = { if (manager.hasPermissions()) manager.startListening() else scanOrRequest() }
@@ -398,6 +406,7 @@ private fun MeshApp() {
                             bleTransport.connect(peer)
                         },
                         relayOptIn = relayOptIn,
+                        nativeFeaturesEnabled = BuildConfig.MESH_NATIVE_ENABLED,
                         relayQueueCount = relayStore.pendingCount(),
                         onRelayOptInChanged = { enabled ->
                             relayStore.setOptIn(enabled)
@@ -489,7 +498,12 @@ private fun ChatScreen(
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = if (message.outgoing) Arrangement.End else Arrangement.Start) {
                     Column(Modifier.widthIn(max = 300.dp).background(if (message.outgoing) Color(0xFF16452F) else MeshSurface, RoundedCornerShape(16.dp)).padding(12.dp)) {
                         Text(message.text, color = Color.White)
-                        Text(if (message.outgoing) "Gönderildi · yerel bağlantı" else "Alındı", color = MeshMuted, fontSize = 10.sp, modifier = Modifier.padding(top = 4.dp))
+                        Text(
+                            if (!message.outgoing) "Alındı"
+                            else if (message.delivered) "Teslim edildi · ACK doğrulandı"
+                            else "Teslim bekleniyor",
+                            color = MeshMuted, fontSize = 10.sp, modifier = Modifier.padding(top = 4.dp)
+                        )
                     }
                 }
             }
@@ -520,6 +534,7 @@ private fun DevicesScreen(
     onBleStart: () -> Unit,
     onBleConnect: (BleGattTransport.Peer) -> Unit,
     relayOptIn: Boolean,
+    nativeFeaturesEnabled: Boolean,
     relayQueueCount: Int,
     onRelayOptInChanged: (Boolean) -> Unit,
     onDevice: (BluetoothChatManager.Peer) -> Unit
@@ -547,39 +562,46 @@ private fun DevicesScreen(
                 }
             }
         }
-        HorizontalDivider(color = Color(0xFF1B3029), modifier = Modifier.padding(vertical = 8.dp))
-        Text("Ortak BLE GATT", color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold)
-        Text("BLE keşif/bağlantı taşıması. Bu ekran henüz sohbet metnini BLE zarfına bağlamaz.", color = MeshMuted, fontSize = 12.sp)
-        Button(onClick = onBleStart, modifier = Modifier.fillMaxWidth()) { Text("BLE taşımasını başlat") }
-        Text(bleStatus, color = MeshGreen, fontSize = 12.sp)
-        Row(
-            Modifier.fillMaxWidth().background(MeshSurface, RoundedCornerShape(14.dp)).padding(12.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Column(Modifier.weight(1f)) {
-                Text("Store-and-forward izni", color = Color.White, fontWeight = FontWeight.SemiBold)
-                Text("Yalnızca doğrulanmış Rust zarflarını cihazda saklar. Canlı çoklu atlama henüz etkin değil. Kuyruk: $relayQueueCount", color = MeshMuted, fontSize = 11.sp)
+        if (nativeFeaturesEnabled) {
+            HorizontalDivider(color = Color(0xFF1B3029), modifier = Modifier.padding(vertical = 8.dp))
+            Text("Ortak BLE GATT", color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+            Text("BLE keşif/bağlantı taşıması. Bu ekran henüz sohbet metnini BLE zarfına bağlamaz.", color = MeshMuted, fontSize = 12.sp)
+            Button(onClick = onBleStart, modifier = Modifier.fillMaxWidth()) { Text("BLE taşımasını başlat") }
+            Text(bleStatus, color = MeshGreen, fontSize = 12.sp)
+            Row(
+                Modifier.fillMaxWidth().background(MeshSurface, RoundedCornerShape(14.dp)).padding(12.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text("Store-and-forward izni", color = Color.White, fontWeight = FontWeight.SemiBold)
+                    Text("Yalnızca doğrulanmış Rust zarflarını cihazda saklar. Canlı çoklu atlama henüz etkin değil. Kuyruk: $relayQueueCount", color = MeshMuted, fontSize = 11.sp)
+                }
+                Switch(checked = relayOptIn, onCheckedChange = onRelayOptInChanged)
             }
-            Switch(checked = relayOptIn, onCheckedChange = onRelayOptInChanged)
-        }
-        LazyColumn(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            items(blePeers, key = { it.device.address }) { peer ->
-                Row(
-                    Modifier.fillMaxWidth().background(MeshSurface, RoundedCornerShape(14.dp))
-                        .clickable { onBleConnect(peer) }.padding(12.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Icon(Icons.Default.Devices, null, tint = MeshGreen)
-                    Spacer(Modifier.width(10.dp))
-                    Column(Modifier.weight(1f)) {
-                        Text(peer.label, color = Color.White, fontWeight = FontWeight.SemiBold)
-                        Text(peer.device.address, color = MeshMuted, fontSize = 10.sp)
+            LazyColumn(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                items(blePeers, key = { it.device.address }) { peer ->
+                    Row(
+                        Modifier.fillMaxWidth().background(MeshSurface, RoundedCornerShape(14.dp))
+                            .clickable { onBleConnect(peer) }.padding(12.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(Icons.Default.Devices, null, tint = MeshGreen)
+                        Spacer(Modifier.width(10.dp))
+                        Column(Modifier.weight(1f)) {
+                            Text(peer.label, color = Color.White, fontWeight = FontWeight.SemiBold)
+                            Text(peer.device.address, color = MeshMuted, fontSize = 10.sp)
+                        }
+                        Text("BAĞLAN", color = MeshGreen, fontSize = 10.sp, fontWeight = FontWeight.Bold)
                     }
-                    Text("BAĞLAN", color = MeshGreen, fontSize = 10.sp, fontWeight = FontWeight.Bold)
                 }
             }
+            Text("Bluetooth Classic sohbeti ve BLE GATT taşıması şu anda ayrı prototiplerdir. BLE paketleri Rust zarf doğrulamasına aktarılabilir; uygulama düzeyinde mesaj, QR kimlik doğrulaması ve E2EE henüz BLE üzerinden tamamlanmamıştır.", color = MeshMuted, fontSize = 11.sp, modifier = Modifier.padding(vertical = 8.dp))
+        } else {
+            InfoCard(
+                "Bluetooth Classic test derlemesi",
+                "Bu paket doğrudan Bluetooth Classic sohbetini ve QR ile kişi doğrulamayı içerir. BLE ve çoklu atlama özellikleri bu test paketinde kapalıdır."
+            )
         }
-        Text("Bluetooth Classic sohbeti ve BLE GATT taşıması şu anda ayrı prototiplerdir. BLE paketleri Rust zarf doğrulamasına aktarılabilir; uygulama düzeyinde mesaj, QR kimlik doğrulaması ve E2EE henüz BLE üzerinden tamamlanmamıştır.", color = MeshMuted, fontSize = 11.sp, modifier = Modifier.padding(vertical = 8.dp))
     }
 }
 

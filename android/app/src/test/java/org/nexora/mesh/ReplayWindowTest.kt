@@ -40,4 +40,15 @@ class ReplayWindowTest {
         assertFalse(window.remember(""))
         assertFalse(window.remember("   "))
     }
+
+    @Test fun duplicateAndPersistenceFailureHaveDifferentOutcomes() {
+        var allowPersist = true
+        val window = ReplayWindow(persist = { allowPersist })
+        assertEquals(ReplayRememberResult.ADDED, window.rememberResult("accepted"))
+        assertEquals(ReplayRememberResult.DUPLICATE, window.rememberResult("accepted"))
+        allowPersist = false
+        assertEquals(ReplayRememberResult.PERSISTENCE_FAILED, window.rememberResult("not-durable"))
+        assertEquals(ReplayRememberResult.INVALID, window.rememberResult(" "))
+        assertEquals(listOf("accepted"), window.snapshot())
+    }
 }

@@ -20,8 +20,14 @@
 | QR payload | Versioned payload includes public identity key, fingerprint, and display label | Scan only QR codes received through a channel you trust; compare the fingerprint through an independent channel when possible. |
 | Chat text | Held in the current UI state; encrypted before the wire frame is emitted | No durable encrypted message database or cross-session history is implemented. Avoid screenshots and device backups for sensitive content. |
 | BLE device metadata | Nearby peer labels and Bluetooth address may be shown in the device list | Radio discovery can reveal proximity and device metadata. Advertisements must not include stable identity keys or contact names. |
-| Received media | Chunks are encrypted in transit and checked by the transfer reassembler; completed files are saved in app-private storage | Saved files are plaintext at rest after receipt. The app has no encrypted media vault or automatic secure deletion. |
+| Received media | Chunks are encrypted in transit and checked by the transfer reassembler; completed files are encrypted with AES-GCM under a non-exportable Android Keystore key and stored in app-private storage | Current sender/receiver still buffer whole files in memory; there is no authenticated per-chunk receipt or durable resume yet. The vault needs on-device instrumentation testing. |
 | Diagnostic status | Short status strings are displayed locally | Do not add message bodies, keys, QR payloads, or raw ciphertext to logs/analytics. |
+
+## 2.1 Media vault implementation status
+
+The Android receive path now passes completed, digest-verified media to MediaVault. The vault encrypts the file with AES-GCM, authenticates the transfer ID, safe filename, and plaintext size as associated data, and writes the ciphertext under the app-private files/secure-media directory. The AES key is generated and retained by Android Keystore. The app does not export or automatically record received media.
+
+This protects completed files at rest. It does **not** yet make the transfer streaming or resumable: the current implementation still reassembles the complete file in memory before vault encryption. Authenticated chunk receipts, durable partial-transfer resume, an explicit decrypt/preview/export flow, and physical-device tests remain open.
 
 ## 3. Trust and session flow
 

@@ -4,6 +4,13 @@ package org.nexora.mesh
  * Bounded persistent replay window for authenticated message IDs.
  * The caller must invoke this only after successful AEAD authentication.
  */
+internal enum class ReplayRememberResult {
+    ADDED,
+    DUPLICATE,
+    PERSISTENCE_FAILED,
+    INVALID
+}
+
 internal class ReplayWindow(
     initial: Collection<String> = emptyList(),
     private val maxSize: Int = 4096,
@@ -14,18 +21,22 @@ internal class ReplayWindow(
         initial.filter { it.isNotBlank() }.takeLast(maxSize).forEach { add(it) }
     }
 
+    fun remember(id: String): Boolean =
+        rememberResult(id) == ReplayRememberResult.ADDED
+
     @Synchronized
-    fun remember(id: String): Boolean {
-        if (id.isBlank() || ids.contains(id)) return false
+    fun rememberResult(id: String): ReplayRememberResult {
+        if (id.isBlank()) return ReplayRememberResult.INVALID
+        if (ids.contains(id)) return ReplayRememberResult.DUPLICATE
         val before = ids.toList()
         ids.add(id)
         while (ids.size > maxSize) ids.remove(ids.first())
         if (!persist(ids.toList())) {
             ids.clear()
             ids.addAll(before)
-            return false
+            return ReplayRememberResult.PERSISTENCE_FAILED
         }
-        return true
+        return ReplayRememberResult.ADDED
     }
 
     @Synchronized
