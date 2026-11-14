@@ -684,6 +684,20 @@ final class MeshSecureChat: ObservableObject {
         SHA256.hash(data: key).prefix(20).map { String(format: "%02X", $0) }.joined(separator: ":")
     }
 
+    /// Canonical, domain-separated associated data for a direct DATA frame.
+    /// Keep field order and normalization stable; changing this is a wire-protocol change.
+    static func dataAAD(from: String, to: String, toNode: String, expiresAt: UInt64, id: String) -> Data {
+        Data(("NexoraMesh/data/v1:" + [from.uppercased(), to.uppercased(), toNode,
+            String(expiresAt), id.lowercased()].joined(separator: ":")).utf8)
+    }
+
+    /// Canonical, domain-separated associated data for an authenticated delivery ACK.
+    static func routedControlAAD(from: String, to: String, relayID: String,
+                                 toNode: String, expiresAt: UInt64) -> Data {
+        Data(("NexoraMesh/routed-control/v1:" + [from.uppercased(), to.uppercased(),
+            relayID.lowercased(), toNode, String(expiresAt)].joined(separator: ":")).utf8)
+    }
+
     static func seal(_ plaintext: Data, key: SymmetricKey, aad: Data) throws -> (nonce: Data, ciphertext: Data) {
         let nonce = AES.GCM.Nonce()
         let sealed = try AES.GCM.seal(plaintext, using: key, nonce: nonce, authenticating: aad)
