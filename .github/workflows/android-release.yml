@@ -84,6 +84,7 @@ jobs:
             dist/android/NexoraMesh-Android-debug.apk
             dist/android/SHA256SUMS.txt
             dist/android/BUILD-INFO.txt
+            dist/android/NexoraMesh-Android-release.apk
           if-no-files-found: error
           retention-days: 90
 
@@ -105,14 +106,17 @@ jobs:
           MESH_RELEASE_STORE_PASSWORD: ${{ secrets.MESH_RELEASE_STORE_PASSWORD }}
           MESH_RELEASE_KEY_ALIAS: ${{ secrets.MESH_RELEASE_KEY_ALIAS }}
           MESH_RELEASE_KEY_PASSWORD: ${{ secrets.MESH_RELEASE_KEY_PASSWORD }}
-        run: bash ./gradlew assembleRelease
+        run: |
+          bash ./gradlew assembleRelease
+          mkdir -p ../dist/android
+          cp app/build/outputs/apk/release/app-release.apk ../dist/android/NexoraMesh-Android-release.apk
 
       - name: Upload optimized signed release APK
         if: ${{ secrets.MESH_RELEASE_KEYSTORE_BASE64 != '' && secrets.MESH_RELEASE_STORE_PASSWORD != '' && secrets.MESH_RELEASE_KEY_ALIAS != '' && secrets.MESH_RELEASE_KEY_PASSWORD != '' }}
         uses: actions/upload-artifact@v4
         with:
           name: nexora-mesh-android-release
-          path: android/app/build/outputs/apk/release/app-release.apk
+          path: dist/android/NexoraMesh-Android-release.apk
           if-no-files-found: error
           retention-days: 90
 
