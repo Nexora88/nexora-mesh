@@ -1,6 +1,8 @@
 package org.nexora.mesh
 
 import android.Manifest
+import android.bluetooth.BluetoothAdapter
+import android.content.Intent
 import android.os.Build
 import android.os.Bundle
 import android.provider.OpenableColumns
@@ -86,6 +88,7 @@ private fun MeshApp() {
     var activeBlePeerId by remember { mutableStateOf<String?>(null) }
     var pendingContact by remember { mutableStateOf<ContactQr.Contact?>(null) }
     var secureChannelActive by remember { mutableStateOf(false) }
+    var pendingBluetoothAction by remember { mutableStateOf<(() -> Unit)?>(null) }
     val messages = remember { mutableStateListOf<BluetoothChatManager.ChatMessage>() }
     val blePeerManagers = remember { mutableStateMapOf<String, BluetoothChatManager>() }
     val blePeerListeners = remember { mutableMapOf<String, BluetoothChatManager.Listener>() }
@@ -246,8 +249,30 @@ private fun MeshApp() {
         }
     }
 
+    val enableBluetoothLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+        if (result.resultCode == Activity.RESULT_OK) {
+            status = "Bluetooth etkinleştirildi."
+            pendingBluetoothAction?.invoke()
+        } else {
+            status = "Bluetooth açılmadı. Cihaz aramak ve bağlanmak için Bluetooth gerekli."
+        }
+        pendingBluetoothAction = null
+    }
+
+    fun runWhenBluetoothEnabled(action: () -> Unit) {
+        val adapter = BluetoothAdapter.getDefaultAdapter()
+        if (adapter == null) {
+            status = "Bu cihaz Bluetooth desteklemiyor."
+        } else if (!adapter.isEnabled) {
+            pendingBluetoothAction = action
+            enableBluetoothLauncher.launch(Intent(BluetoothAdapter.ACTION_REQUEST_ENABLE))
+        } else {
+            action()
+        }
+    }
+
     val permissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { grants ->
-        if (grants.values.all { it }) manager.startDiscovery()
+        if (grants.values.all { it }) runWhenBluetoothEnabled { manager.startDiscovery() }
         else status = "Cihaz keşfi için Bluetooth izinleri verilmedi."
     }
 
@@ -322,7 +347,7 @@ private fun MeshApp() {
             Manifest.permission.BLUETOOTH_ADVERTISE
         ) else arrayOf(Manifest.permission.ACCESS_FINE_LOCATION)
         if (required.all { ContextCompat.checkSelfPermission(context, it) == PackageManager.PERMISSION_GRANTED }) {
-            bleTransport.start()
+            runWhenBluetoothEnabled { bleTransport.start() }
         } else {
             blePermissionLauncher.launch(required)
         }
@@ -359,7 +384,7 @@ private fun MeshApp() {
         }
     }
     fun scanOrRequest() {
-        if (manager.hasPermissions()) manager.startDiscovery()
+        if (manager.hasPermissions()) runWhenBluetoothEnabled { manager.startDiscovery() }
         else {
             val requested = if (Build.VERSION.SDK_INT >= 31) arrayOf(Manifest.permission.BLUETOOTH_SCAN, Manifest.permission.BLUETOOTH_CONNECT)
                 else arrayOf(Manifest.permission.ACCESS_FINE_LOCATION)
@@ -396,7 +421,7 @@ private fun MeshApp() {
                         scanning = scanning,
                         status = status,
                         onScan = ::scanOrRequest,
-                        onListen = { if (manager.hasPermissions()) manager.startListening() else scanOrRequest() },
+                        onListen = { if (manager.hasPermissions()) runWhenBluetoothEnabled { manager.startListening() } else scanOrRequest() },
                         blePeers = blePeers,
                         bleStatus = bleStatus,
                         onBleStart = ::startBleOrRequest,
