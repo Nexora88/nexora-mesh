@@ -30,6 +30,7 @@ import androidx.compose.runtime.snapshots.SnapshotStateList
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.foundation.Image
 import android.graphics.Bitmap
@@ -47,7 +48,8 @@ import com.google.zxing.integration.android.IntentIntegrator
 
 private val MeshBackground = Color(0xFF07110F)
 private val MeshSurface = Color(0xFF10201C)
-private val MeshGreen = Color(0xFF65F2AD)
+private val MeshGreen = Color(0xFF25C8FF)
+private val MeshViolet = Color(0xFF7548E8)
 private val MeshMuted = Color(0xFF91A69D)
 private const val BLE_HOP_KEY_EPOCH = 1L
 
@@ -434,8 +436,8 @@ private fun MeshApp() {
 private fun Header(connectionName: String?) {
     Column(Modifier.fillMaxWidth().padding(horizontal = 22.dp, vertical = 18.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Box(Modifier.size(42.dp).background(MeshGreen, RoundedCornerShape(14.dp)), contentAlignment = Alignment.Center) {
-                Icon(Icons.Default.NearMe, null, tint = Color(0xFF062017))
+            Box(Modifier.size(42.dp).background(Brush.linearGradient(listOf(MeshViolet, MeshGreen)), RoundedCornerShape(14.dp)), contentAlignment = Alignment.Center) {
+                Text("N", color = Color.White, fontSize = 25.sp, fontWeight = FontWeight.Black)
             }
             Spacer(Modifier.width(12.dp))
             Column(Modifier.weight(1f)) {
