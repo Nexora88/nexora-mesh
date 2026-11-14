@@ -1,6 +1,8 @@
 package org.nexora.mesh
 
 import android.Manifest
+import android.bluetooth.BluetoothAdapter
+import android.content.Intent
 import android.os.Build
 import android.os.Bundle
 import android.provider.OpenableColumns
@@ -86,6 +88,7 @@ private fun MeshApp() {
     var activeBlePeerId by remember { mutableStateOf<String?>(null) }
     var pendingContact by remember { mutableStateOf<ContactQr.Contact?>(null) }
     var secureChannelActive by remember { mutableStateOf(false) }
+    var pendingBluetoothAction by remember { mutableStateOf<(() -> Unit)?>(null) }
     val messages = remember { mutableStateListOf<BluetoothChatManager.ChatMessage>() }
     val blePeerManagers = remember { mutableStateMapOf<String, BluetoothChatManager>() }
     val blePeerListeners = remember { mutableMapOf<String, BluetoothChatManager.Listener>() }
@@ -246,13 +249,35 @@ private fun MeshApp() {
         }
     }
 
+    val enableBluetoothLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+        if (result.resultCode == Activity.RESULT_OK) {
+            status = "Bluetooth etkinleştirildi."
+            pendingBluetoothAction?.invoke()
+        } else {
+            status = "Bluetooth açılmadı. Cihaz aramak ve bağlanmak için Bluetooth gerekli."
+        }
+        pendingBluetoothAction = null
+    }
+
+    fun runWhenBluetoothEnabled(action: () -> Unit) {
+        val adapter = BluetoothAdapter.getDefaultAdapter()
+        if (adapter == null) {
+            status = "Bu cihaz Bluetooth desteklemiyor."
+        } else if (!adapter.isEnabled) {
+            pendingBluetoothAction = action
+            enableBluetoothLauncher.launch(Intent(BluetoothAdapter.ACTION_REQUEST_ENABLE))
+        } else {
+            action()
+        }
+    }
+
     val permissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { grants ->
-        if (grants.values.all { it }) manager.startDiscovery()
+        if (grants.values.all { it }) runWhenBluetoothEnabled { manager.startDiscovery() }
         else status = "Cihaz keşfi için Bluetooth izinleri verilmedi."
     }
 
     val blePermissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { grants ->
-        if (grants.values.all { it }) bleTransport.start()
+        if (grants.values.all { it }) runWhenBluetoothEnabled { bleTransport.start() }
         else bleStatus = "BLE keşfi/yayını için Bluetooth izinleri verilmedi."
     }
 
@@ -322,7 +347,7 @@ private fun MeshApp() {
             Manifest.permission.BLUETOOTH_ADVERTISE
         ) else arrayOf(Manifest.permission.ACCESS_FINE_LOCATION)
         if (required.all { ContextCompat.checkSelfPermission(context, it) == PackageManager.PERMISSION_GRANTED }) {
-            bleTransport.start()
+            runWhenBluetoothEnabled { bleTransport.start() }
         } else {
             blePermissionLauncher.launch(required)
         }
@@ -359,7 +384,7 @@ private fun MeshApp() {
         }
     }
     fun scanOrRequest() {
-        if (manager.hasPermissions()) manager.startDiscovery()
+        if (manager.hasPermissions()) runWhenBluetoothEnabled { manager.startDiscovery() }
         else {
             val requested = if (Build.VERSION.SDK_INT >= 31) arrayOf(Manifest.permission.BLUETOOTH_SCAN, Manifest.permission.BLUETOOTH_CONNECT)
                 else arrayOf(Manifest.permission.ACCESS_FINE_LOCATION)
@@ -396,7 +421,7 @@ private fun MeshApp() {
                         scanning = scanning,
                         status = status,
                         onScan = ::scanOrRequest,
-                        onListen = { if (manager.hasPermissions()) manager.startListening() else scanOrRequest() },
+                        onListen = { if (manager.hasPermissions()) runWhenBluetoothEnabled { manager.startListening() } else scanOrRequest() },
                         blePeers = blePeers,
                         bleStatus = bleStatus,
                         onBleStart = ::startBleOrRequest,
@@ -415,7 +440,7 @@ private fun MeshApp() {
                         onDevice = { peer ->
                             activeBlePeerId = null
                             activePeer = peer
-                            if (peer.bonded) manager.connect(peer.device) else manager.pair(peer.device)
+                            runWhenBluetoothEnabled { if (peer.bonded) manager.connect(peer.device) else manager.pair(peer.device) }
                         }
                     )
                     else -> SecurityScreen(
@@ -539,72 +564,95 @@ private fun DevicesScreen(
     onRelayOptInChanged: (Boolean) -> Unit,
     onDevice: (BluetoothChatManager.Peer) -> Unit
 ) {
-    Column(Modifier.fillMaxSize().padding(horizontal = 18.dp)) {
-        Text("Cihaz keşfi", color = Color.White, fontSize = 27.sp, fontWeight = FontWeight.Bold)
-        Text("Arama yalnızca sen başlattığında yapılır. Bilinmeyen cihazı seçmek Android sistem eşleştirmesini başlatır; tanımadığın kişiyi eşleştirme.", color = MeshMuted, fontSize = 13.sp, modifier = Modifier.padding(top = 6.dp, bottom = 12.dp))
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-            Button(onClick = onScan, modifier = Modifier.weight(1f), enabled = !scanning) { Text(if (scanning) "Aranıyor…" else "Yakındaki cihazları ara") }
-            OutlinedButton(onClick = onListen, modifier = Modifier.weight(1f)) { Text("Bağlantı bekle") }
+    LazyColumn(
+        modifier = Modifier.fillMaxSize().padding(horizontal = 18.dp),
+        contentPadding = PaddingValues(bottom = 24.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp)
+    ) {
+        item {
+            Text("Cihaz keşfi", color = Color.White, fontSize = 27.sp, fontWeight = FontWeight.Bold)
+            Text("Yakındaki telefonları ara, eşleştir ve bağlantı durumunu buradan takip et. Arama yalnızca sen başlattığında yapılır.",
+                color = MeshMuted, fontSize = 13.sp, modifier = Modifier.padding(top = 6.dp, bottom = 4.dp))
         }
-        Text(status, color = MeshGreen, fontSize = 12.sp, modifier = Modifier.padding(vertical = 10.dp))
-        LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        item {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                Button(onClick = onScan, modifier = Modifier.weight(1f), enabled = !scanning) {
+                    Text(if (scanning) "Aranıyor…" else "Cihazları ara")
+                }
+                OutlinedButton(onClick = onListen, modifier = Modifier.weight(1f)) { Text("Bağlantı bekle") }
+            }
+        }
+        item { InfoCard("Bluetooth Classic durumu", status.ifBlank { "Henüz işlem yapılmadı." }) }
+        item { Text("Eşleştirilebilir cihazlar (\${devices.size})", color = Color.White, fontSize = 19.sp, fontWeight = FontWeight.Bold) }
+        if (devices.isEmpty()) {
+            item {
+                InfoCard(if (scanning) "Cihazlar aranıyor" else "Henüz cihaz bulunmadı",
+                    if (scanning) "Telefonun Bluetooth taraması sürüyor. Diğer telefonu görünür ve yakında tut."
+                    else "Önce Bluetooth'u aç, ardından “Cihazları ara” düğmesine dokun. Diğer telefonun Bluetooth'u da açık olmalı.")
+            }
+        } else {
             items(devices, key = { it.address }) { peer ->
-                Row(Modifier.fillMaxWidth().background(MeshSurface, RoundedCornerShape(16.dp)).clickable { onDevice(peer) }.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
+                Row(Modifier.fillMaxWidth().background(MeshSurface, RoundedCornerShape(16.dp)).padding(12.dp),
+                    verticalAlignment = Alignment.CenterVertically) {
                     Box(Modifier.size(42.dp).background(Color(0xFF1C4535), CircleShape), contentAlignment = Alignment.Center) {
                         Icon(Icons.Default.Devices, null, tint = MeshGreen)
                     }
-                    Spacer(Modifier.width(12.dp))
+                    Spacer(Modifier.width(10.dp))
                     Column(Modifier.weight(1f)) {
                         Text(peer.name, color = Color.White, fontWeight = FontWeight.SemiBold)
                         Text(peer.address, color = MeshMuted, fontSize = 11.sp)
+                        Text(if (peer.bonded) "Android ile eşleştirilmiş" else "Henüz eşleştirilmemiş", color = MeshMuted, fontSize = 10.sp)
                     }
-                    Text(if (peer.bonded) "EŞLEŞTİ" else "EŞLEŞTİR", color = MeshGreen, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                    Button(onClick = { onDevice(peer) }) { Text(if (peer.bonded) "Bağlan" else "Eşleştir") }
                 }
             }
         }
         if (nativeFeaturesEnabled) {
-            HorizontalDivider(color = Color(0xFF1B3029), modifier = Modifier.padding(vertical = 8.dp))
-            Text("Ortak BLE GATT", color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold)
-            Text("BLE keşif/bağlantı taşıması. Bu ekran henüz sohbet metnini BLE zarfına bağlamaz.", color = MeshMuted, fontSize = 12.sp)
-            Button(onClick = onBleStart, modifier = Modifier.fillMaxWidth()) { Text("BLE taşımasını başlat") }
-            Text(bleStatus, color = MeshGreen, fontSize = 12.sp)
-            Row(
-                Modifier.fillMaxWidth().background(MeshSurface, RoundedCornerShape(14.dp)).padding(12.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Column(Modifier.weight(1f)) {
-                    Text("Store-and-forward izni", color = Color.White, fontWeight = FontWeight.SemiBold)
-                    Text("Yalnızca doğrulanmış Rust zarflarını cihazda saklar. Canlı çoklu atlama henüz etkin değil. Kuyruk: $relayQueueCount", color = MeshMuted, fontSize = 11.sp)
-                }
-                Switch(checked = relayOptIn, onCheckedChange = onRelayOptInChanged)
+            item {
+                HorizontalDivider(color = Color(0xFF1B3029), modifier = Modifier.padding(vertical = 6.dp))
+                Text("Ortak BLE GATT", color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+                Text("BLE keşif ve bağlantı taşıması. Bu test sürümünde sohbet metni BLE üzerinden gönderilmez.", color = MeshMuted, fontSize = 12.sp)
+                Button(onClick = onBleStart, modifier = Modifier.fillMaxWidth()) { Text("BLE taşımasını başlat") }
+                Text(bleStatus, color = MeshGreen, fontSize = 12.sp)
             }
-            LazyColumn(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            item {
+                Row(Modifier.fillMaxWidth().background(MeshSurface, RoundedCornerShape(14.dp)).padding(12.dp),
+                    verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text("Store-and-forward izni", color = Color.White, fontWeight = FontWeight.SemiBold)
+                        Text("Yalnızca doğrulanmış Rust zarflarını cihazda saklar. Canlı çoklu atlama etkin değil. Kuyruk: $relayQueueCount",
+                            color = MeshMuted, fontSize = 11.sp)
+                    }
+                    Switch(checked = relayOptIn, onCheckedChange = onRelayOptInChanged)
+                }
+            }
+            item { Text("BLE cihazları (\${blePeers.size})", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold) }
+            if (blePeers.isEmpty()) {
+                item { Text("Henüz BLE cihazı bulunmadı.", color = MeshMuted, fontSize = 12.sp) }
+            } else {
                 items(blePeers, key = { it.device.address }) { peer ->
-                    Row(
-                        Modifier.fillMaxWidth().background(MeshSurface, RoundedCornerShape(14.dp))
-                            .clickable { onBleConnect(peer) }.padding(12.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
+                    Row(Modifier.fillMaxWidth().background(MeshSurface, RoundedCornerShape(14.dp)).padding(12.dp),
+                        verticalAlignment = Alignment.CenterVertically) {
                         Icon(Icons.Default.Devices, null, tint = MeshGreen)
                         Spacer(Modifier.width(10.dp))
                         Column(Modifier.weight(1f)) {
                             Text(peer.label, color = Color.White, fontWeight = FontWeight.SemiBold)
                             Text(peer.device.address, color = MeshMuted, fontSize = 10.sp)
                         }
-                        Text("BAĞLAN", color = MeshGreen, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                        Button(onClick = { onBleConnect(peer) }) { Text("Bağlan") }
                     }
                 }
             }
-            Text("Bluetooth Classic sohbeti ve BLE GATT taşıması şu anda ayrı prototiplerdir. BLE paketleri Rust zarf doğrulamasına aktarılabilir; uygulama düzeyinde mesaj, QR kimlik doğrulaması ve E2EE henüz BLE üzerinden tamamlanmamıştır.", color = MeshMuted, fontSize = 11.sp, modifier = Modifier.padding(vertical = 8.dp))
+            item { Text("Bluetooth Classic sohbeti ve BLE GATT taşıması ayrı prototiplerdir. BLE üzerinden mesaj, QR kimlik doğrulaması ve E2EE henüz tamamlanmamıştır.",
+                color = MeshMuted, fontSize = 11.sp) }
         } else {
-            InfoCard(
-                "Bluetooth Classic test derlemesi",
-                "Bu paket doğrudan Bluetooth Classic sohbetini ve QR ile kişi doğrulamayı içerir. BLE ve çoklu atlama özellikleri bu test paketinde kapalıdır."
-            )
+            item { InfoCard("Bluetooth Classic test derlemesi",
+                "Bu pakette doğrudan Bluetooth Classic sohbeti ve QR ile kişi doğrulama bulunur. BLE ve çoklu atlama bu test paketinde kapalıdır.") }
         }
+        item { InfoCard("Güvenli bağlantı adımı",
+            "Cihazı eşleştirdikten sonra Güvenlik sekmesinden karşılıklı QR kodlarını tarayıp parmak izlerini doğrulayın. Güvenli kanal kurulmadan mesaj gönderilemez.") }
     }
 }
-
 @Composable
 private fun SecurityScreen(
     connectionName: String?,
