@@ -539,7 +539,7 @@ private fun DevicesScreen(
     onRelayOptInChanged: (Boolean) -> Unit,
     onDevice: (BluetoothChatManager.Peer) -> Unit
 ) {
-    Column(Modifier.fillMaxSize().padding(horizontal = 18.dp)) {
+    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 18.dp)) {
         Text("Cihaz keşfi", color = Color.White, fontSize = 27.sp, fontWeight = FontWeight.Bold)
         Text("Arama yalnızca sen başlattığında yapılır. Bilinmeyen cihazı seçmek Android sistem eşleştirmesini başlatır; tanımadığın kişiyi eşleştirme.", color = MeshMuted, fontSize = 13.sp, modifier = Modifier.padding(top = 6.dp, bottom = 12.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
@@ -547,9 +547,9 @@ private fun DevicesScreen(
             OutlinedButton(onClick = onListen, modifier = Modifier.weight(1f)) { Text("Bağlantı bekle") }
         }
         Text(status, color = MeshGreen, fontSize = 12.sp, modifier = Modifier.padding(vertical = 10.dp))
-        LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            items(devices, key = { it.address }) { peer ->
-                Row(Modifier.fillMaxWidth().background(MeshSurface, RoundedCornerShape(16.dp)).clickable { onDevice(peer) }.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            devices.forEach { peer ->
+                Row(Modifier.fillMaxWidth().background(MeshSurface, RoundedCornerShape(16.dp)).padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
                     Box(Modifier.size(42.dp).background(Color(0xFF1C4535), CircleShape), contentAlignment = Alignment.Center) {
                         Icon(Icons.Default.Devices, null, tint = MeshGreen)
                     }
@@ -558,7 +558,9 @@ private fun DevicesScreen(
                         Text(peer.name, color = Color.White, fontWeight = FontWeight.SemiBold)
                         Text(peer.address, color = MeshMuted, fontSize = 11.sp)
                     }
-                    Text(if (peer.bonded) "EŞLEŞTİ" else "EŞLEŞTİR", color = MeshGreen, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                    Button(onClick = { onDevice(peer) }, contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)) {
+                        Text(if (peer.bonded) "BAĞLAN" else "EŞLEŞTİR", fontSize = 10.sp)
+                    }
                 }
             }
         }
@@ -578,11 +580,11 @@ private fun DevicesScreen(
                 }
                 Switch(checked = relayOptIn, onCheckedChange = onRelayOptInChanged)
             }
-            LazyColumn(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                items(blePeers, key = { it.device.address }) { peer ->
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                blePeers.forEach { peer ->
                     Row(
                         Modifier.fillMaxWidth().background(MeshSurface, RoundedCornerShape(14.dp))
-                            .clickable { onBleConnect(peer) }.padding(12.dp),
+                            .padding(12.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Icon(Icons.Default.Devices, null, tint = MeshGreen)
@@ -591,7 +593,9 @@ private fun DevicesScreen(
                             Text(peer.label, color = Color.White, fontWeight = FontWeight.SemiBold)
                             Text(peer.device.address, color = MeshMuted, fontSize = 10.sp)
                         }
-                        Text("BAĞLAN", color = MeshGreen, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                        Button(onClick = { onBleConnect(peer) }, contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)) {
+                            Text("BAĞLAN", fontSize = 10.sp)
+                        }
                     }
                 }
             }
