@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-labelledby="title">
+<title id="title">Nexora Mesh</title>
+<defs>
+ <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#111827"/><stop offset="1" stop-color="#05070d"/></linearGradient>
+ <linearGradient id="mesh" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#e65cff"/><stop offset=".48" stop-color="#7548ff"/><stop offset="1" stop-color="#16d8ff"/></linearGradient>
+ <linearGradient id="word" x1="0" y1="0" x2="1" y2="0"><stop stop-color="#f8fafc"/><stop offset="1" stop-color="#c9eaff"/></linearGradient>
+</defs>
+<rect x="10" y="10" width="492" height="492" rx="100" fill="url(#bg)" stroke="#202a40" stroke-width="5"/>
+<g fill="none" stroke="url(#mesh)" stroke-width="3" opacity=".85">
+ <path d="M256 78 128 158 94 256 128 354 256 434 384 354 418 256 384 158Z"/>
+ <path d="M128 158 220 158 256 78 292 158 384 158M94 256 190 210 256 256 322 210 418 256M128 354 220 354 256 434 292 354 384 354"/>
+ <path d="M220 158 256 256 292 158M190 210 220 354M322 210 292 354M256 78V434"/>
+</g>
+<g fill="url(#mesh)" stroke="#b9f3ff" stroke-width="1.5">
+ <circle cx="256" cy="78" r="10"/><circle cx="128" cy="158" r="9"/><circle cx="384" cy="158" r="9"/>
+ <circle cx="94" cy="256" r="9"/><circle cx="418" cy="256" r="9"/><circle cx="128" cy="354" r="9"/>
+ <circle cx="384" cy="354" r="9"/><circle cx="256" cy="434" r="10"/><circle cx="220" cy="158" r="5"/><circle cx="292" cy="158" r="5"/>
+</g>
+<path d="M151 172c0-9 7-16 16-16h17c9 0 16 4 22 12l81 111 0-107c0-9 7-16 16-16h13c9 0 16 7 16 16v164c0 10-7 17-17 17h-11c-9 0-16-4-22-12l-83-112v108c0 9-7 16-16 16h-16c-9 0-16-7-16-16z" fill="url(#mesh)"/>
+<text x="256" y="465" text-anchor="middle" font-family="Arial,sans-serif" font-size="27" letter-spacing="9" fill="url(#word)">NEXORA MESH</text>
+</svg>
