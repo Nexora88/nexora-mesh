@@ -116,7 +116,7 @@ final class MeshBLETransport: NSObject, ObservableObject {
             lowPowerMode: ProcessInfo.processInfo.isLowPowerModeEnabled,
             appForeground: true,
             recentlyConnected: connectedPeripheral != nil,
-            urgentPending: !pendingWrites.isEmpty || !pendingNotifications.isEmpty
+            urgentPending: peerPendingWrites.values.contains { !$0.isEmpty } || centralPendingNotifications.values.contains { !$0.isEmpty }
         )
         let stopWindow = DispatchWorkItem { [weak self] in
             guard let self, self.discoveryRequested else { return }
@@ -257,7 +257,7 @@ final class MeshBLETransport: NSObject, ObservableObject {
     /// Send notifications to exactly one subscribed central, never broadcast to every peer.
     func send(envelope: Data, toCentral peerID: UUID) {
         guard !envelope.isEmpty, envelope.count <= Self.maxEnvelopeBytes,
-              let central = subscribedCentralsByID[peerID], let characteristic else {
+              let central = subscribedCentralsByID[peerID], characteristic != nil else {
             status = "Seçilen BLE merkez eşinin aboneliği hazır değil."
             return
         }

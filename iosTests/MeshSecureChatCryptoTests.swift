@@ -50,6 +50,27 @@ final class MeshSecureChatCryptoTests: XCTestCase {
             peerA: peerA, peerB: peerB, epoch: 42))
     }
 
+    func testDataAADBindsAllMessageMetadata() {
+        let baseline = MeshSecureChat.dataAAD(from: "AA:BB", to: "CC:DD",
+            toNode: "node-token", expiresAt: 1_900_000_000, id: "123e4567-e89b-12d3-a456-426614174000")
+        XCTAssertEqual(baseline, MeshSecureChat.dataAAD(from: "aa:bb", to: "cc:dd",
+            toNode: "node-token", expiresAt: 1_900_000_000, id: "123E4567-E89B-12D3-A456-426614174000"))
+        XCTAssertNotEqual(baseline, MeshSecureChat.dataAAD(from: "AA:BB", to: "CC:DD",
+            toNode: "different-node", expiresAt: 1_900_000_000, id: "123e4567-e89b-12d3-a456-426614174000"))
+        XCTAssertNotEqual(baseline, MeshSecureChat.dataAAD(from: "AA:BB", to: "CC:DD",
+            toNode: "node-token", expiresAt: 1_900_000_001, id: "123e4567-e89b-12d3-a456-426614174000"))
+    }
+
+    func testRoutedControlAADIsDomainSeparatedAndBindsRelayMetadata() {
+        let baseline = MeshSecureChat.routedControlAAD(from: "AA:BB", to: "CC:DD",
+            relayID: "123e4567-e89b-12d3-a456-426614174000", toNode: "node-token", expiresAt: 1_900_000_000)
+        XCTAssertTrue(String(decoding: baseline, as: UTF8.self).hasPrefix("NexoraMesh/routed-control/v1:"))
+        XCTAssertNotEqual(baseline, MeshSecureChat.routedControlAAD(from: "AA:BB", to: "CC:DD",
+            relayID: "123e4567-e89b-12d3-a456-426614174001", toNode: "node-token", expiresAt: 1_900_000_000))
+        XCTAssertNotEqual(baseline, MeshSecureChat.dataAAD(from: "AA:BB", to: "CC:DD",
+            toNode: "node-token", expiresAt: 1_900_000_000, id: "123e4567-e89b-12d3-a456-426614174000"))
+    }
+
     func testTamperedCiphertextIsRejected() throws {
         let key = SymmetricKey(data: Data(repeating: 7, count: 32))
         let aad = Data("NexoraMesh/data/v1:test".utf8)

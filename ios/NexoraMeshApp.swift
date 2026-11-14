@@ -5,9 +5,10 @@ import VisionKit
 import Security
 
 private enum MeshPalette {
-    static let background = Color(red: 7 / 255, green: 17 / 255, blue: 15 / 255)
-    static let surface = Color(red: 16 / 255, green: 32 / 255, blue: 28 / 255)
-    static let green = Color(red: 101 / 255, green: 242 / 255, blue: 173 / 255)
+    static let background = Color(red: 8 / 255, green: 11 / 255, blue: 20 / 255)
+    static let surface = Color(red: 17 / 255, green: 25 / 255, blue: 42 / 255)
+    static let green = Color(red: 37 / 255, green: 200 / 255, blue: 255 / 255)
+    static let violet = Color(red: 117 / 255, green: 72 / 255, blue: 232 / 255)
     static let muted = Color(red: 145 / 255, green: 166 / 255, blue: 157 / 255)
 }
 
@@ -208,16 +209,16 @@ struct MeshRootView: View {
 
     private var header: some View {
         HStack(spacing: 12) {
-            Image(systemName: "dot.radiowaves.left.and.right")
+            Image(systemName: "point.3.connected.trianglepath.dotted")
                 .font(.title2.bold())
-                .foregroundStyle(MeshPalette.background)
+                .foregroundStyle(.white)
                 .frame(width: 44, height: 44)
-                .background(MeshPalette.green, in: RoundedRectangle(cornerRadius: 14))
+                .background(LinearGradient(colors: [MeshPalette.violet, MeshPalette.green], startPoint: .topLeading, endPoint: .bottomTrailing), in: RoundedRectangle(cornerRadius: 14))
             VStack(alignment: .leading, spacing: 3) {
                 Text("NEXORA MESH")
                     .font(.headline.weight(.black))
                     .tracking(1.2)
-                    .foregroundStyle(MeshPalette.green)
+                     .foregroundStyle(LinearGradient(colors: [MeshPalette.violet, MeshPalette.green], startPoint: .leading, endPoint: .trailing))
                 Text("İnternetsiz iletişim vizyonu")
                     .font(.caption)
                     .foregroundStyle(MeshPalette.muted)

@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-  <meta name="theme-color" content="#0b141a">
+  <meta name="theme-color" content="#080b14">
   <meta name="description" content="Nexora Mesh — yerel ve çevrimdışı iletişim arayüzü.">
   <link rel="manifest" href="./manifest.webmanifest">
   <link rel="icon" href="./icon.svg" type="image/svg+xml">
@@ -13,7 +13,7 @@
 <body>
 <div class="app">
   <aside class="rail">
-    <a class="brand" href="#" aria-label="Nexora Mesh"><span class="brand-icon">N</span></a>
+    <a class="brand" href="#" aria-label="Nexora Mesh"><img class="brand-logo" src="./icon.svg" alt="Nexora Mesh"></a>
     <button class="rail-btn active" data-view="chats" title="Sohbetler">▤</button>
     <button class="rail-btn" data-view="devices" title="Cihazlar">⌁</button>
     <button class="rail-btn" data-view="relay" title="Mesh ağı">◈</button>
@@ -32,7 +32,7 @@
     <section id="view-chats" class="view chat-view">
       <header class="chat-header"><div class="chat-person"><div id="active-avatar" class="avatar">NM</div><div><h2 id="active-name">Nexora Mesh</h2><p id="active-presence">Özel ve yerel iletişim alanı</p></div></div><div class="header-actions"><button class="header-btn" title="Ara" disabled>⌕</button><button class="header-btn" title="Bilgi" id="chat-info">ⓘ</button><button class="header-btn" title="Diğer" id="more-actions">⋮</button></div></header>
       <div class="security-strip"><span>◈</span><span>Bu arayüz şu anda yerel önizleme modunda. Native radyo köprüsü bağlı değil; mesajlar başka cihaza gönderilmez.</span><button id="security-details">Detay</button></div>
-      <div id="messages" class="messages"><div class="welcome"><div class="welcome-mark">N</div><h2>Bağlantını kur, konuşmaya başla.</h2><p>Bir kişi seç veya cihazını QR kimliğiyle tanıt. Gerçek aktarım yalnızca doğrulanmış native bağlantı kurulduğunda kullanılabilir.</p><button class="primary-btn" id="welcome-add">Cihaz tanıt</button></div></div>
+      <div id="messages" class="messages"><div class="welcome"><img class="welcome-mark" src="./logo.svg" alt="Nexora Mesh"><h2>Bağlantını kur, konuşmaya başla.</h2><p>Bir kişi seç veya cihazını QR kimliğiyle tanıt. Gerçek aktarım yalnızca doğrulanmış native bağlantı kurulduğunda kullanılabilir.</p><button class="primary-btn" id="welcome-add">Cihaz tanıt</button></div></div>
       <div class="composer-area">
         <div class="composer-tools"><button id="attach-btn" title="Dosya ekle">＋</button><button id="emoji-btn" title="Emoji">☺</button><input id="file-input" type="file" hidden></div>
         <textarea id="message-input" rows="1" placeholder="Önce bir sohbet seç…" disabled maxlength="4000"></textarea>

@@ -5,6 +5,11 @@ plugins {
 }
 
 val directChatOnly = (project.findProperty("meshDirectChatOnly") as String?)?.toBoolean() ?: false
+val releaseStoreFile = System.getenv("MESH_RELEASE_STORE_FILE")
+val releaseStorePassword = System.getenv("MESH_RELEASE_STORE_PASSWORD")
+val releaseKeyAlias = System.getenv("MESH_RELEASE_KEY_ALIAS")
+val releaseKeyPassword = System.getenv("MESH_RELEASE_KEY_PASSWORD")
+val hasReleaseSigning = listOf(releaseStoreFile, releaseStorePassword, releaseKeyAlias, releaseKeyPassword).all { !it.isNullOrBlank() }
 android {
     namespace = "org.nexora.mesh"
     compileSdk = 35
@@ -21,6 +26,27 @@ android {
         buildConfigField("boolean", "MESH_NATIVE_ENABLED", (!directChatOnly).toString())
         externalNativeBuild {
             cmake { arguments += listOf("-DMESH_NATIVE_ENABLED=${if (directChatOnly) "OFF" else "ON"}") }
+        }
+    }
+    signingConfigs {
+        if (hasReleaseSigning) {
+            create("release") {
+                storeFile = file(releaseStoreFile!!)
+                storePassword = releaseStorePassword
+                keyAlias = releaseKeyAlias
+                keyPassword = releaseKeyPassword
+            }
+        }
+    }
+    buildTypes {
+        getByName("release") {
+            isMinifyEnabled = true
+            isShrinkResources = true
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro"
+            )
+            if (hasReleaseSigning) signingConfig = signingConfigs.getByName("release")
         }
     }
     buildFeatures { compose = true; buildConfig = true }
