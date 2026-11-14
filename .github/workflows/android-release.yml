@@ -84,7 +84,6 @@ jobs:
             dist/android/NexoraMesh-Android-debug.apk
             dist/android/SHA256SUMS.txt
             dist/android/BUILD-INFO.txt
-            dist/android/NexoraMesh-Android-release.apk
           if-no-files-found: error
           retention-days: 90
 
