@@ -7,6 +7,10 @@
 - CI içindeki iOS adımı imzasız **Simulator uygulaması** üretir; fiziksel iPhone'a kurulabilir IPA üretmez.
 - Bluetooth CoreBluetooth kodu prototiptir; iki Apple cihaz arasında gerçek mesaj teslimi doğrulanmamıştır.
 
+## iPhone 6–17 model ailesi uyumluluğu
+
+Mevcut uygulama için doğrulanmış minimum sürüm iOS 17'dir. iPhone 6–iPhone 17 aralığındaki her modelin desteklendiği henüz söylenemez; modelin çalıştırabildiği iOS sürümü belirleyicidir. iOS 17 çalıştırabilen cihazlar mevcut uygulama hedefiyle uyumluluk adayıdır; fiziksel cihaz testleri yine gerekir.
+
 ## iPhone 6 uyumluluğu
 
 iPhone 6 en fazla iOS 12.5.7 çalıştırır. Mevcut uygulamanın iOS 17 hedefi bu telefona kurulamaz. SwiftUI arayüzü de iOS 13 ve üzerini gerektirdiğinden yalnızca deployment target değerini düşürmek çözüm değildir.
