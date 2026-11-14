@@ -277,7 +277,7 @@ private fun MeshApp() {
     }
 
     val blePermissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { grants ->
-        if (grants.values.all { it }) bleTransport.start()
+        if (grants.values.all { it }) runWhenBluetoothEnabled { bleTransport.start() }
         else bleStatus = "BLE keşfi/yayını için Bluetooth izinleri verilmedi."
     }
 
@@ -440,7 +440,7 @@ private fun MeshApp() {
                         onDevice = { peer ->
                             activeBlePeerId = null
                             activePeer = peer
-                            if (peer.bonded) manager.connect(peer.device) else manager.pair(peer.device)
+                            runWhenBluetoothEnabled { if (peer.bonded) manager.connect(peer.device) else manager.pair(peer.device) }
                         }
                     )
                     else -> SecurityScreen(
